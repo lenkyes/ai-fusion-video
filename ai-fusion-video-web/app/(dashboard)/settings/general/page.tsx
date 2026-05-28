@@ -544,7 +544,7 @@ export default function GeneralSettingsPage() {
                   onChange={(e) =>
                     setConfigs((prev) => ({ ...prev, mail_from: e.target.value }))
                   }
-                  placeholder="融光视频平台 &lt;your-email@qq.com&gt;"
+                  placeholder="星拓视频平台 &lt;your-email@qq.com&gt;"
                   className={cn(
                     "w-full px-4 py-2.5 rounded-xl text-sm",
                     "bg-muted/30 border border-border/30",

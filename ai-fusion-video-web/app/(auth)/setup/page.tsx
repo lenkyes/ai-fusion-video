@@ -222,7 +222,7 @@ export default function SetupPage() {
 
       {/* 底部信息 */}
       <p className="text-xs text-white/30 pt-4">
-        融光 · 首次启动配置
+        星拓 · 首次启动配置
       </p>
     </AuthLayout>
   );

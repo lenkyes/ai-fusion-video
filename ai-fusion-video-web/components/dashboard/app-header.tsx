@@ -168,10 +168,10 @@ export function AppHeader() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.png"
-              alt="融光"
+              alt="星拓"
               className="h-8 w-auto ml-2 rounded-lg"
             />
-            <span className="ml-2 text-lg font-bold text-foreground">融光</span>
+            <span className="ml-2 text-lg font-bold text-foreground">星拓</span>
           </div>
         }
         mobileControls={

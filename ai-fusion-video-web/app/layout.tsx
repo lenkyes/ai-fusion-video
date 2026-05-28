@@ -20,8 +20,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    template: "%s - 融光",
-    default: "融光",
+    template: "%s - 星拓",
+    default: "星拓",
   },
   description: "基于 Agent 的智能视频创作平台",
 };

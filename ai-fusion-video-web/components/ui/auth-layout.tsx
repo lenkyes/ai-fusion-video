@@ -98,7 +98,7 @@ export const AuthLayout = ({
         <div className="absolute top-6 left-6 z-20 flex items-center gap-3">
           <Image
             src="/logo.png"
-            alt="融光"
+            alt="星拓"
             width={480}
             height={96}
             priority
