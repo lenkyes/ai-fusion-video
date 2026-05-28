@@ -83,6 +83,70 @@ public class NewApiVideoProtocolSupport {
         return body;
     }
 
+    public JSONObject buildSeedanceContentGenerationBody(NewApiVideoProtocolContext context) {
+        JSONObject body = JSONUtil.createObj();
+        String modelCode = StrUtil.trim(context.model().getCode());
+        if (StrUtil.isBlank(modelCode)) {
+            throw new BusinessException("New API Seedance 视频模型未配置 code");
+        }
+        body.set("model", modelCode);
+
+        JSONArray contents = JSONUtil.createArray();
+        appendTextContent(contents, context.task().getPrompt());
+        appendImageContent(contents, context.task().getFirstFrameImageUrl(), "first_frame");
+        appendImageContent(contents, context.task().getLastFrameImageUrl(), "last_frame");
+
+        for (String imageUrl : parseJsonUrls(context.task().getReferenceImageUrls())) {
+            appendImageContent(contents, imageUrl, "reference_image");
+        }
+        for (String videoUrl : parseJsonUrls(context.task().getReferenceVideoUrls())) {
+            appendVideoContent(contents, videoUrl, "reference_video");
+        }
+        for (String audioUrl : parseJsonUrls(context.task().getReferenceAudioUrls())) {
+            appendAudioContent(contents, audioUrl, "reference_audio");
+        }
+
+        if (contents.isEmpty()) {
+            throw new BusinessException("New API Seedance 视频任务至少需要 prompt 或参考素材之一");
+        }
+        body.set("content", contents);
+
+        if (context.task().getWatermark() != null) {
+            body.set("watermark", context.task().getWatermark());
+        } else {
+            body.set("watermark", getBoolean(context.modelConfig(), "watermark", false));
+        }
+
+        if (context.task().getGenerateAudio() != null) {
+            body.set("generate_audio", context.task().getGenerateAudio());
+        } else if (containsAnyKey(context.modelConfig(), "generateAudio", "generate_audio")) {
+            body.set("generate_audio", getBoolean(context.modelConfig(), "generateAudio", "generate_audio", true));
+        }
+
+        if (context.task().getCameraFixed() != null) {
+            body.set("camera_fixed", context.task().getCameraFixed());
+        } else if (containsAnyKey(context.modelConfig(), "cameraFixed", "camera_fixed")) {
+            body.set("camera_fixed", getBoolean(context.modelConfig(), "cameraFixed", "camera_fixed", false));
+        }
+
+        appendOptionalString(body, "ratio", context.task().getRatio());
+        appendOptionalString(body, "resolution", context.task().getResolution());
+
+        Integer duration = firstPositive(
+                context.task().getDuration(),
+                getPositiveInteger(context.modelConfig(), "defaultDuration", "duration"));
+        if (duration != null) {
+            body.set("duration", duration.longValue());
+        }
+
+        if (context.task().getSeed() != null) {
+            body.set("seed", context.task().getSeed());
+        }
+
+        body.set("return_last_frame", getBoolean(context.modelConfig(), "returnLastFrame", "return_last_frame", true));
+        return body;
+    }
+
     private JSONObject resolveMetadata(JSONObject modelConfig) {
         JSONObject metadata = new JSONObject();
         Object metadataObject = modelConfig.get("metadata");
@@ -184,6 +248,39 @@ public class NewApiVideoProtocolSupport {
         }
     }
 
+    private void appendTextContent(JSONArray contents, String prompt) {
+        String text = StrUtil.trim(prompt);
+        if (StrUtil.isBlank(text)) {
+            return;
+        }
+        contents.add(JSONUtil.createObj()
+                .set("type", "text")
+                .set("text", text));
+    }
+
+    private void appendImageContent(JSONArray contents, String url, String role) {
+        appendMediaContent(contents, "image_url", "image_url", url, role);
+    }
+
+    private void appendVideoContent(JSONArray contents, String url, String role) {
+        appendMediaContent(contents, "video_url", "video_url", url, role);
+    }
+
+    private void appendAudioContent(JSONArray contents, String url, String role) {
+        appendMediaContent(contents, "audio_url", "audio_url", url, role);
+    }
+
+    private void appendMediaContent(JSONArray contents, String type, String field, String url, String role) {
+        String mediaUrl = StrUtil.trim(url);
+        if (StrUtil.isBlank(mediaUrl)) {
+            return;
+        }
+        contents.add(JSONUtil.createObj()
+                .set("type", type)
+                .set(field, JSONUtil.createObj().set("url", mediaUrl))
+                .set("role", role));
+    }
+
     private void mergeJsonObject(JSONObject target, JSONObject source) {
         if (target == null || source == null || source.isEmpty()) {
             return;
@@ -235,6 +332,55 @@ public class NewApiVideoProtocolSupport {
             }
         }
         return null;
+    }
+
+    private Boolean getBoolean(JSONObject config, String key, boolean defaultValue) {
+        return getBoolean(config, new String[]{key}, defaultValue);
+    }
+
+    private Boolean getBoolean(JSONObject config, String key1, String key2, boolean defaultValue) {
+        return getBoolean(config, new String[]{key1, key2}, defaultValue);
+    }
+
+    private Boolean getBoolean(JSONObject config, String key1, String key2, String key3, boolean defaultValue) {
+        return getBoolean(config, new String[]{key1, key2, key3}, defaultValue);
+    }
+
+    private Boolean getBoolean(JSONObject config, String[] keys, boolean defaultValue) {
+        if (config == null) {
+            return defaultValue;
+        }
+        for (String key : keys) {
+            if (!config.containsKey(key)) {
+                continue;
+            }
+            Object value = config.get(key);
+            if (value instanceof Boolean bool) {
+                return bool;
+            }
+            if (value != null) {
+                String text = value.toString().trim();
+                if ("true".equalsIgnoreCase(text) || "1".equals(text) || "yes".equalsIgnoreCase(text)) {
+                    return true;
+                }
+                if ("false".equalsIgnoreCase(text) || "0".equals(text) || "no".equalsIgnoreCase(text)) {
+                    return false;
+                }
+            }
+        }
+        return defaultValue;
+    }
+
+    private boolean containsAnyKey(JSONObject config, String... keys) {
+        if (config == null) {
+            return false;
+        }
+        for (String key : keys) {
+            if (config.containsKey(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Integer firstPositive(Integer... values) {

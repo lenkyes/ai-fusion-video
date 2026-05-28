@@ -1,8 +1,11 @@
 package com.stonewu.fusion.service.generation.strategy;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.entity.ai.AiModel;
+import com.stonewu.fusion.service.ai.model.AiModelMetadata;
 import com.stonewu.fusion.service.ai.model.AiModelMetadataResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -35,18 +38,18 @@ public class VideoGenerationStrategyRouter {
             throw new BusinessException("没有可用的视频生成策略");
         }
 
-        String platform = aiModelMetadataResolver.resolvePlatform(model);
-        String normalizedPlatform = aiModelMetadataResolver.normalizePlatform(platform);
-        if (StrUtil.isBlank(normalizedPlatform)) {
+        AiModelMetadata metadata = resolveMetadata(model);
+        if (metadata == null || StrUtil.isBlank(metadata.normalizedPlatform())) {
             throw new BusinessException("视频模型未绑定有效 API 配置，无法确定接入渠道");
         }
 
-        VideoGenerationStrategy strategy = candidates.get(normalizedPlatform);
+        String strategyKey = resolveStrategyKey(model, metadata, candidates);
+        VideoGenerationStrategy strategy = candidates.get(strategyKey);
         if (strategy != null) {
             return strategy;
         }
 
-        throw new BusinessException("未找到匹配的视频生成策略: " + platform);
+        throw new BusinessException("未找到匹配的视频生成策略: " + metadata.platform());
     }
 
     public boolean supports(AiModel model) {
@@ -54,16 +57,100 @@ public class VideoGenerationStrategyRouter {
             return false;
         }
         try {
-            String platform = aiModelMetadataResolver.resolvePlatform(model);
-            String normalizedPlatform = aiModelMetadataResolver.normalizePlatform(platform);
-            return StrUtil.isNotBlank(normalizedPlatform) && getStrategyMap().containsKey(normalizedPlatform);
+            AiModelMetadata metadata = resolveMetadata(model);
+            if (metadata == null || StrUtil.isBlank(metadata.normalizedPlatform())) {
+                return false;
+            }
+            return getStrategyMap().containsKey(resolveStrategyKey(model, metadata, getStrategyMap()));
         } catch (Exception ignored) {
             return false;
         }
     }
 
     public String supportedPlatformsText() {
-        return String.join(", ", getStrategyMap().keySet());
+        String text = String.join(", ", getStrategyMap().keySet());
+        if (getStrategyMap().containsKey("newapi")) {
+            text += ", openai_compatible(seedance), bytedance(seedance)";
+        }
+        return text;
+    }
+
+    private AiModelMetadata resolveMetadata(AiModel model) {
+        String platform = aiModelMetadataResolver.resolvePlatform(model);
+        return aiModelMetadataResolver.resolve(model, platform);
+    }
+
+    private String resolveStrategyKey(AiModel model, AiModelMetadata metadata,
+                                      Map<String, VideoGenerationStrategy> candidates) {
+        String explicitStrategy = configuredStrategy(model);
+        if (StrUtil.isNotBlank(explicitStrategy)) {
+            return aiModelMetadataResolver.normalizePlatform(explicitStrategy);
+        }
+
+        String normalizedPlatform = metadata.normalizedPlatform();
+        if (candidates.containsKey(normalizedPlatform)) {
+            return normalizedPlatform;
+        }
+
+        if (isOpenAiCompatibleSeedanceGateway(metadata) && candidates.containsKey("newapi")) {
+            return "newapi";
+        }
+        return normalizedPlatform;
+    }
+
+    private boolean isOpenAiCompatibleSeedanceGateway(AiModelMetadata metadata) {
+        if (metadata == null || !"seedance".equals(metadata.effectiveFamily())) {
+            return false;
+        }
+        String platform = metadata.normalizedPlatform();
+        return "openai_compatible".equals(platform) || "bytedance".equals(platform);
+    }
+
+    private String configuredStrategy(AiModel model) {
+        JSONObject config = parseConfig(model != null ? model.getConfig() : null);
+        return firstNonBlank(
+                getString(config, "videoStrategy", "video_strategy",
+                        "videoStrategyPlatform", "video_strategy_platform"),
+                getString(config, "generationStrategy", "generation_strategy",
+                        "generationStrategyPlatform", "generation_strategy_platform"),
+                getString(config, "strategyPlatform", "strategy_platform", "strategy"));
+    }
+
+    private JSONObject parseConfig(String configJson) {
+        if (StrUtil.isBlank(configJson)) {
+            return new JSONObject();
+        }
+        try {
+            return JSONUtil.parseObj(configJson);
+        } catch (Exception ignored) {
+            return new JSONObject();
+        }
+    }
+
+    private String getString(JSONObject config, String... keys) {
+        if (config == null) {
+            return null;
+        }
+        for (String key : keys) {
+            Object value = config.get(key);
+            if (value == null) {
+                continue;
+            }
+            String text = value.toString().trim();
+            if (StrUtil.isNotBlank(text)) {
+                return text;
+            }
+        }
+        return null;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private Map<String, VideoGenerationStrategy> getStrategyMap() {

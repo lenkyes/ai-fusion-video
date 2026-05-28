@@ -164,7 +164,7 @@ public class AiModelMetadataResolver {
             case "dashscope" -> "wan";
             case "volcengine" -> "seedance";
             case "newapi" -> switch (StrUtil.blankToDefault(family, "generic")) {
-                case "jimeng", "kling", "sora" -> family;
+                case "jimeng", "kling", "seedance", "sora" -> family;
                 default -> "generic";
             };
             default -> StrUtil.blankToDefault(family, "generic");

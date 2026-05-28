@@ -74,4 +74,61 @@ class VideoGenerationStrategyRouterTests {
         assertFalse(router.supports(openAiCompatibleVideoModel));
         assertTrue(router.supports(newApiVideoModel));
     }
+
+    @Test
+    void shouldRouteOpenAiCompatibleSeedanceVideoThroughNewApiStrategy() {
+        ApiConfigService apiConfigService = mock(ApiConfigService.class);
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(apiConfigService);
+
+        VideoGenerationStrategy newApiStrategy = mock(VideoGenerationStrategy.class);
+        when(newApiStrategy.getName()).thenReturn("newapi");
+
+        VideoGenerationStrategyRouter router = new VideoGenerationStrategyRouter(
+                List.of(newApiStrategy),
+                resolver
+        );
+
+        AiModel seedanceVideoModel = AiModel.builder()
+                .id(4L)
+                .code("bytedance/seedance-2-fast")
+                .apiConfigId(14L)
+                .modelType(3)
+                .build();
+        when(apiConfigService.getById(14L)).thenReturn(ApiConfig.builder()
+                .id(14L)
+                .platform("openai_compatible")
+                .build());
+
+        assertTrue(router.supports(seedanceVideoModel));
+        assertSame(newApiStrategy, router.resolve(seedanceVideoModel));
+    }
+
+    @Test
+    void shouldRouteExplicitConfiguredVideoStrategy() {
+        ApiConfigService apiConfigService = mock(ApiConfigService.class);
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(apiConfigService);
+
+        VideoGenerationStrategy newApiStrategy = mock(VideoGenerationStrategy.class);
+        when(newApiStrategy.getName()).thenReturn("newapi");
+
+        VideoGenerationStrategyRouter router = new VideoGenerationStrategyRouter(
+                List.of(newApiStrategy),
+                resolver
+        );
+
+        AiModel customVideoModel = AiModel.builder()
+                .id(5L)
+                .code("custom-video-model")
+                .apiConfigId(15L)
+                .modelType(3)
+                .config("{\"videoStrategy\":\"newapi\"}")
+                .build();
+        when(apiConfigService.getById(15L)).thenReturn(ApiConfig.builder()
+                .id(15L)
+                .platform("openai_compatible")
+                .build());
+
+        assertTrue(router.supports(customVideoModel));
+        assertSame(newApiStrategy, router.resolve(customVideoModel));
+    }
 }

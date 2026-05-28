@@ -5,7 +5,10 @@
 services:
   # ---------- 后端 ----------
   backend:
-    image: stonewuu/ai-fusion-video:latest
+    build:
+      context: ./ai-fusion-video
+      dockerfile: Dockerfile
+    image: ai-fusion-video:local
     container_name: fusion-backend
     restart: unless-stopped
     # 【新增】映射宿主机网关，允许容器访问宿主机上的服务
@@ -31,7 +34,12 @@ services:
 
   # ---------- 前端 ----------
   frontend:
-    image: stonewuu/ai-fusion-video-web:latest
+    build:
+      context: ./ai-fusion-video-web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ""
+    image: ai-fusion-video-web:local
     container_name: fusion-frontend
     restart: unless-stopped
     environment:

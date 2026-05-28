@@ -38,4 +38,19 @@ class AiModelMetadataResolverTests {
         assertEquals("generic", metadata.modelFamily());
         assertEquals("generic", metadata.modelProtocol());
     }
+
+    @Test
+    void shouldInferSeedanceProtocolForNewApiSeedanceModel() {
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
+        AiModel model = AiModel.builder()
+                .name("Seedance 2 Fast")
+                .code("bytedance/seedance-2-fast")
+                .modelType(3)
+                .build();
+
+        AiModelMetadata metadata = resolver.resolve(model, "newapi");
+
+        assertEquals("seedance", metadata.modelFamily());
+        assertEquals("seedance", metadata.modelProtocol());
+    }
 }

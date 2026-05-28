@@ -357,6 +357,13 @@ public class GenerationModelCapabilityService {
         String code = model != null && StrUtil.isNotBlank(model.getCode())
                 ? model.getCode().toLowerCase(Locale.ROOT) : "";
 
+        if ("seedance".equals(metadata.effectiveFamily())) {
+            VideoModelCapability seedanceCapability = inferSeedanceVideoCapability(code);
+            if (seedanceCapability != null) {
+                return seedanceCapability;
+            }
+        }
+
         if ("googleflowreverseapi".equals(normalizedPlatform)) {
             if (code.contains("r2v")) {
                 return new VideoModelCapability(false, false, true, false, false,
@@ -376,25 +383,9 @@ public class GenerationModelCapabilityService {
         }
 
         if ("volcengine".equals(normalizedPlatform)) {
-            if (code.contains("seedance-2-0")) {
-                return new VideoModelCapability(true, true, true, true, true,
-                        0, null, 9, 3, 3);
-            }
-            if (code.contains("1-0-lite-t2v")) {
-                return new VideoModelCapability(false, false, false, false, false,
-                        0, 0, 0, 0, 0);
-            }
-            if (code.contains("1-0-lite-i2v")) {
-                return new VideoModelCapability(true, true, true, false, false,
-                        0, null, 9, 0, 0);
-            }
-            if (code.contains("1-0-pro-fast")) {
-                return new VideoModelCapability(true, false, false, false, false,
-                        0, 1, 0, 0, 0);
-            }
-            if (code.contains("1-5-pro") || code.contains("1-0-pro")) {
-                return new VideoModelCapability(true, true, false, false, false,
-                        0, 2, 0, 0, 0);
+            VideoModelCapability seedanceCapability = inferSeedanceVideoCapability(code);
+            if (seedanceCapability != null) {
+                return seedanceCapability;
             }
         }
 
@@ -432,6 +423,37 @@ public class GenerationModelCapabilityService {
 
         return new VideoModelCapability(false, false, false, false, false,
                 0, 0, 0, 0, 0);
+    }
+
+    private VideoModelCapability inferSeedanceVideoCapability(String code) {
+        String normalizedCode = StrUtil.blankToDefault(code, "")
+                .replace('_', '-')
+                .replace('.', '-');
+        if (!normalizedCode.contains("seedance")) {
+            return null;
+        }
+        if (normalizedCode.contains("seedance-2")) {
+            return new VideoModelCapability(true, true, true, true, true,
+                    0, null, 9, 3, 3);
+        }
+        if (normalizedCode.contains("1-0-lite-t2v")) {
+            return new VideoModelCapability(false, false, false, false, false,
+                    0, 0, 0, 0, 0);
+        }
+        if (normalizedCode.contains("1-0-lite-i2v")) {
+            return new VideoModelCapability(true, true, true, false, false,
+                    0, null, 9, 0, 0);
+        }
+        if (normalizedCode.contains("1-0-pro-fast")) {
+            return new VideoModelCapability(true, false, false, false, false,
+                    0, 1, 0, 0, 0);
+        }
+        if (normalizedCode.contains("1-5-pro") || normalizedCode.contains("1-0-pro")) {
+            return new VideoModelCapability(true, true, false, false, false,
+                    0, 2, 0, 0, 0);
+        }
+        return new VideoModelCapability(true, false, true, false, false,
+                0, 1, 1, 0, 0);
     }
 
     private JSONObject parseConfig(String configJson) {
