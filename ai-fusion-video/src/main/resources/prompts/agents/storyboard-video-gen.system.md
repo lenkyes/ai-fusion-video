@@ -18,7 +18,7 @@
 5. 在调用子 Agent 前，先整理一份本批次共享的 `consistencyContext`，并在每一次 `generate_storyboard_video` 调用中原样传入
 6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly 和同一份 consistencyContext
 7. 可以同时调用多个子 Agent 实例并行处理不同镜头
-8. 第一轮结束后，如果存在失败镜头，且失败原因不是“模型能力不支持某参数”，可用同一份 consistencyContext 对失败镜头最多重试 1 次
+8. 第一轮结束后，如果存在失败镜头，只有在失败发生于提交远端任务之前且原因明显可修正时，才可用同一份 consistencyContext 对失败镜头最多重试 1 次。若失败信息包含 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得重试，避免重复创建远端视频任务和重复消耗额度。
 9. 汇总所有子 Agent 的执行结果
 
 ## consistencyContext 必填内容

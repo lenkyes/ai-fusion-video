@@ -2,6 +2,7 @@ package com.stonewu.fusion.service.generation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import cn.hutool.core.util.StrUtil;
 import com.stonewu.fusion.common.PageResult;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.entity.generation.VideoItem;
@@ -101,5 +102,18 @@ public class VideoGenerationService {
 
     public List<VideoTask> findPendingTasks() {
         return taskMapper.selectList(new LambdaQueryWrapper<VideoTask>().in(VideoTask::getStatus, 0, 1));
+    }
+
+    public VideoTask findLatestByCategory(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return null;
+        }
+        LambdaQueryWrapper<VideoTask> wrapper = new LambdaQueryWrapper<VideoTask>()
+                .eq(VideoTask::getCategory, category)
+                .eq(userId != null, VideoTask::getUserId, userId)
+                .eq(modelId != null, VideoTask::getModelId, modelId)
+                .orderByDesc(VideoTask::getCreateTime)
+                .last("LIMIT 1");
+        return taskMapper.selectOne(wrapper);
     }
 }

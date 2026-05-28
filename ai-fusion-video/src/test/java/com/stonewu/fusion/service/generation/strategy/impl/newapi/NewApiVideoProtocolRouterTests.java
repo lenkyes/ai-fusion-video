@@ -48,4 +48,23 @@ class NewApiVideoProtocolRouterTests {
 
         assertSame(genericAdapter, router.resolve(context));
     }
+
+    @Test
+    void shouldPreferFamilyAdapterWhenStoredProtocolIsGeneric() {
+        NewApiVideoProtocolAdapter genericAdapter = mock(NewApiVideoProtocolAdapter.class);
+        when(genericAdapter.getProtocol()).thenReturn("generic");
+        NewApiVideoProtocolAdapter seedanceAdapter = mock(NewApiVideoProtocolAdapter.class);
+        when(seedanceAdapter.getProtocol()).thenReturn("seedance");
+
+        NewApiVideoProtocolRouter router = new NewApiVideoProtocolRouter(List.of(genericAdapter, seedanceAdapter));
+        NewApiVideoProtocolContext context = new NewApiVideoProtocolContext(
+                AiModel.builder().code("bytedance/seedance-2-fast").build(),
+                null,
+                null,
+                new JSONObject(),
+                new AiModelMetadata("newapi", "newapi", "seedance", "generic")
+        );
+
+        assertSame(seedanceAdapter, router.resolve(context));
+    }
 }

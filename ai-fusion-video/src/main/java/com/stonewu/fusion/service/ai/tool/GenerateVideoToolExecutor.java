@@ -132,6 +132,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                         .set("type", "array")
                         .set("items", JSONUtil.createObj().set("type", "string"))
                         .set("description", referenceAudioDescription))
+                    .set("storyboardItemId", JSONUtil.createObj()
+                        .set("type", "integer")
+                        .set("description", "分镜镜头ID；批量分镜生成时必须传，用于幂等防重复提交远端视频任务"))
                     .set("ratio", JSONUtil.createObj()
                         .set("type", "string")
                         .set("description", "画面比例，如 16:9、9:16、1:1（默认 16:9）"))
@@ -152,6 +155,10 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     @Override
     public String execute(String toolInput, ToolExecutionContext context) {
+        String idempotencyCategory = null;
+        Long userId = context != null ? context.getUserId() : null;
+        Long modelId = null;
+        VideoTask task = null;
         try {
             JSONObject params = JSONUtil.parseObj(toolInput);
             String prompt = params.getStr("prompt");
@@ -164,6 +171,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             String ratio = params.getStr("ratio", "16:9");
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
+            Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
 
             // 解析多模态参考图片列表
             List<String> referenceImageUrlList = new ArrayList<>();
@@ -189,9 +197,15 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             String generateMode = StrUtil.isNotBlank(firstFrameImageUrl) ? "image2video" : "text2video";
 
             AiModel model = resolvePreferredModel();
+            modelId = model.getId();
+            idempotencyCategory = storyboardItemCategory(storyboardItemId);
+            VideoTask existingTask = findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
+            if (existingTask != null) {
+                return handleExistingVideoTask(existingTask, prompt, effectiveWaitTimeoutMsOrDefault());
+            }
 
             // 构建生视频任务
-            VideoTask task = VideoTask.builder()
+            task = VideoTask.builder()
                     .prompt(prompt)
                     .generateMode(generateMode)
                     .firstFrameImageUrl(firstFrameImageUrl)
@@ -203,8 +217,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .duration(duration)
                     .cameraFixed(cameraFixed)
                     .modelId(model.getId())
+                    .category(idempotencyCategory)
                     .count(1)
-                    .userId(context.getUserId())
+                    .userId(userId)
                     .build();
 
             generationModelCapabilityService.validateVideoTask(model, task);
@@ -233,19 +248,20 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             log.info("[generate_video] 生成成功: videoUrl={}, coverUrl={}",
                     videoItem.getVideoUrl(), videoItem.getCoverUrl());
 
-            return JSONUtil.createObj()
-                    .set("status", "success")
-                    .set("videoUrl", videoItem.getVideoUrl())
-                    .set("coverUrl", videoItem.getCoverUrl())
-                    .set("duration", videoItem.getDuration())
-                    .set("prompt", prompt)
-                    .toString();
+            return successResult(videoItem, prompt);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return errorResult("生成任务被中断");
         } catch (Exception e) {
             log.error("[generate_video] 生成视频失败", e);
+            VideoTask failedTask = task != null && task.getId() != null
+                    ? task
+                    : findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
+            if (failedTask != null && StrUtil.isNotBlank(idempotencyCategory)) {
+                return nonRetryableExistingTaskResult(failedTask,
+                        "生成失败，已阻止同一镜头重复创建远端视频任务: " + e.getMessage());
+            }
             return errorResult("生成失败: " + e.getMessage());
         }
     }
@@ -305,8 +321,106 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         return waitTimeoutMs > 0 ? waitTimeoutMs : DEFAULT_WAIT_TIMEOUT_MS;
     }
 
+    private long effectiveWaitTimeoutMsOrDefault() {
+        return resolveWaitTimeoutMs();
+    }
+
     private String errorResult(String message) {
         return JSONUtil.createObj().set("status", "error").set("message", message).toString();
+    }
+
+    private String successResult(VideoItem videoItem, String prompt) {
+        return JSONUtil.createObj()
+                .set("status", "success")
+                .set("videoUrl", videoItem.getVideoUrl())
+                .set("coverUrl", videoItem.getCoverUrl())
+                .set("duration", videoItem.getDuration())
+                .set("prompt", prompt)
+                .toString();
+    }
+
+    private VideoTask findExistingStoryboardVideoTask(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return null;
+        }
+        return videoGenerationService.findLatestByCategory(category, userId, modelId);
+    }
+
+    private String handleExistingVideoTask(VideoTask existingTask, String prompt, long timeoutMs)
+            throws InterruptedException {
+        if ((existingTask.getStatus() != null && existingTask.getStatus() == 0)
+                || (existingTask.getStatus() != null && existingTask.getStatus() == 1)) {
+            try {
+                VideoTask completed = videoGenerationConsumer.waitForTask(existingTask.getTaskId(), timeoutMs);
+                return resultFromCompletedTask(completed, prompt);
+            } catch (RuntimeException e) {
+                return nonRetryableExistingTaskResult(existingTask,
+                        "同一镜头已有视频任务提交过远端，本次只等待已有任务，不再重复创建。等待结果失败: " + e.getMessage());
+            }
+        }
+        if (existingTask.getStatus() != null && existingTask.getStatus() == 2) {
+            return resultFromCompletedTask(existingTask, prompt);
+        }
+        return nonRetryableExistingTaskResult(existingTask,
+                "同一镜头已有视频任务失败，已阻止重复创建远端视频任务。请修正参考图 URL 或手动清理任务后再提交。");
+    }
+
+    private String resultFromCompletedTask(VideoTask completedTask, String prompt) {
+        List<VideoItem> items = videoGenerationService.listItems(completedTask.getId());
+        VideoItem videoItem = firstVideoItem(items);
+        if (videoItem == null) {
+            return nonRetryableExistingTaskResult(completedTask,
+                    "已有视频任务完成但未获取到视频 URL，已阻止重复创建远端视频任务。");
+        }
+        return successResult(videoItem, prompt);
+    }
+
+    private String nonRetryableExistingTaskResult(VideoTask task, String message) {
+        return JSONUtil.createObj()
+                .set("status", "error")
+                .set("message", message)
+                .set("retryable", false)
+                .set("remoteTaskSubmitted", hasPlatformTaskId(task))
+                .set("videoTaskId", task.getId())
+                .set("taskId", task.getTaskId())
+                .set("platformTaskIds", platformTaskIds(task))
+                .toString();
+    }
+
+    private boolean hasPlatformTaskId(VideoTask task) {
+        return !platformTaskIds(task).isEmpty();
+    }
+
+    private List<String> platformTaskIds(VideoTask task) {
+        if (task == null || task.getId() == null) {
+            return List.of();
+        }
+        List<VideoItem> items = videoGenerationService.listItems(task.getId());
+        List<String> ids = new ArrayList<>();
+        for (VideoItem item : items) {
+            if (StrUtil.isNotBlank(item.getPlatformTaskId())) {
+                ids.add(item.getPlatformTaskId());
+            }
+        }
+        return ids;
+    }
+
+    private VideoItem firstVideoItem(List<VideoItem> items) {
+        if (items == null) {
+            return null;
+        }
+        return items.stream()
+                .filter(item -> StrUtil.isNotBlank(item.getVideoUrl()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Long positiveLong(Long value) {
+        return value != null && value > 0 ? value : null;
+    }
+
+    private String storyboardItemCategory(Long storyboardItemId) {
+        return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
     }
 
     /**

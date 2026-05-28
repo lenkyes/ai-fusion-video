@@ -24,9 +24,25 @@ public class NewApiVideoProtocolRouter {
     public NewApiVideoProtocolAdapter resolve(NewApiVideoProtocolContext context) {
         Map<String, NewApiVideoProtocolAdapter> map = getAdapterMap();
         String protocol = context.metadata() != null ? context.metadata().effectiveProtocol() : "generic";
+        String family = context.metadata() != null ? context.metadata().effectiveFamily() : "generic";
+
+        if ("generic".equals(protocol)) {
+            NewApiVideoProtocolAdapter familyAdapter = resolveFamilyAdapter(map, family);
+            if (familyAdapter != null) {
+                return familyAdapter;
+            }
+        }
+
         NewApiVideoProtocolAdapter adapter = map.get(protocol);
         if (adapter != null) {
             return adapter;
+        }
+
+        NewApiVideoProtocolAdapter familyAdapter = resolveFamilyAdapter(map, family);
+        if (familyAdapter != null) {
+            log.warn("[NewApi Video] 未找到协议适配器，回退到模型家族适配器: protocol={}, family={}, model={}",
+                    protocol, family, context.model() != null ? context.model().getCode() : null);
+            return familyAdapter;
         }
 
         if (!"generic".equals(protocol)) {
@@ -40,6 +56,13 @@ public class NewApiVideoProtocolRouter {
         }
 
         throw new BusinessException("New API 缺少通用视频协议适配器");
+    }
+
+    private NewApiVideoProtocolAdapter resolveFamilyAdapter(Map<String, NewApiVideoProtocolAdapter> map, String family) {
+        if ("generic".equals(family)) {
+            return null;
+        }
+        return map.get(family);
     }
 
     private Map<String, NewApiVideoProtocolAdapter> getAdapterMap() {

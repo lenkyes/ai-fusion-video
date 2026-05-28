@@ -53,4 +53,21 @@ class AiModelMetadataResolverTests {
         assertEquals("seedance", metadata.modelFamily());
         assertEquals("seedance", metadata.modelProtocol());
     }
+
+    @Test
+    void shouldTreatExplicitGenericMetadataAsWeakWhenCodeHasSpecificFamily() {
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
+        AiModel model = AiModel.builder()
+                .name("Seedance 2 Fast")
+                .code("bytedance/seedance-2-fast")
+                .modelType(3)
+                .modelFamily("generic")
+                .modelProtocol("generic")
+                .build();
+
+        AiModelMetadata metadata = resolver.resolve(model, "newapi");
+
+        assertEquals("seedance", metadata.modelFamily());
+        assertEquals("seedance", metadata.modelProtocol());
+    }
 }

@@ -89,4 +89,54 @@ class NewApiVideoStrategyTests {
         assertEquals("http://cdn.example.com/cover.jpg", result.coverUrl());
         assertEquals(5, result.duration());
     }
+
+    @Test
+    void shouldParseV3TaskResultWithRootContentVideo() {
+        NewApiVideoStrategy.NewApiVideoResult result = strategy.parseQueryResult("""
+                {
+                  "status": "succeeded",
+                  "content": {
+                    "video_url": "http://cdn.example.com/root-content-video.mp4",
+                    "last_frame_url": "http://cdn.example.com/last.png",
+                    "duration": 6
+                  }
+                }
+                """);
+
+        assertEquals("succeeded", result.status());
+        assertEquals("http://cdn.example.com/root-content-video.mp4", result.videoUrl());
+        assertEquals("http://cdn.example.com/last.png", result.lastFrameUrl());
+        assertEquals(6, result.duration());
+    }
+
+    @Test
+    void shouldParseV3TaskResultWithContentArrayVideoObject() {
+        NewApiVideoStrategy.NewApiVideoResult result = strategy.parseQueryResult("""
+                {
+                  "status": "succeeded",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    },
+                    {
+                      "type": "video_url",
+                      "video_url": {
+                        "url": "http://cdn.example.com/content-array-video.mp4"
+                      }
+                    },
+                    {
+                      "type": "last_frame_url",
+                      "last_frame_url": {
+                        "url": "http://cdn.example.com/content-array-last.png"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        assertEquals("succeeded", result.status());
+        assertEquals("http://cdn.example.com/content-array-video.mp4", result.videoUrl());
+        assertEquals("http://cdn.example.com/content-array-last.png", result.lastFrameUrl());
+    }
 }

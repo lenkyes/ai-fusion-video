@@ -505,6 +505,7 @@ public class AiAgentRegistry {
                                                                                 - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
                                                                                 - 不要把分镜条目ID传给 storyboardSceneId 或 sceneId；生成视频时必须使用 storyboardItemId
+                                                                                - 如果视频生成返回 retryable=false、remoteTaskSubmitted=true、平台任务ID、HTTP 4xx 或资源不可访问，不要再次为同一 storyboardItemId 调用 generate_video
 
                                                                                 message 格式模板（具体内容必须来自 get_project / get_storyboard_scene_items 查询结果，不要照抄占位符）：
                                                                                 请为分镜镜头生成视频。

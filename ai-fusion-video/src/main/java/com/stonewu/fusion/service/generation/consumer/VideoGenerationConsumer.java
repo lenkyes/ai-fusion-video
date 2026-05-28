@@ -108,15 +108,16 @@ public class VideoGenerationConsumer {
      */
     public VideoTask submitAndWait(VideoTask task, long timeoutMs) throws InterruptedException {
         String taskId = submitTask(task);
+        return waitForTask(taskId, timeoutMs);
+    }
 
+    public VideoTask waitForTask(String taskId, long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         long pollInterval = 3000L;
 
         log.info("[VideoConsumer] 同步等待任务完成: taskId={}, timeout={}ms", taskId, timeoutMs);
 
         while (System.currentTimeMillis() < deadline) {
-            Thread.sleep(pollInterval);
-
             VideoTask current = videoGenerationService.getByTaskId(taskId);
             switch (current.getStatus()) {
                 case 2: // 已完成
@@ -129,10 +130,13 @@ public class VideoGenerationConsumer {
                     // 0-排队中 1-处理中，继续等待
                     break;
             }
+
+            Thread.sleep(pollInterval);
         }
 
         // 超时：标记任务失败
-        videoGenerationService.updateStatus(task.getId(), 3, "同步等待超时");
+        VideoTask current = videoGenerationService.getByTaskId(taskId);
+        videoGenerationService.updateStatus(current.getId(), 3, "同步等待超时");
         throw new RuntimeException("生视频任务排队超时（等待 " + (timeoutMs / 1000) + " 秒），当前任务较多，请稍后重试");
     }
 

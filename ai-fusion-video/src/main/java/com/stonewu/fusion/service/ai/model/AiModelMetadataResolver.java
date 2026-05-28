@@ -31,17 +31,22 @@ public class AiModelMetadataResolver {
         String family = firstNonBlank(
                 model != null ? model.getModelFamily() : null,
                 getString(config, "modelFamily", "family", "upstreamFamily", "upstream_family"));
-        family = normalizeFamily(StrUtil.isNotBlank(family)
-                ? family
-                : inferFamily(normalizedPlatform, model != null ? model.getCode() : null,
+        String inferredFamily = normalizeFamily(inferFamily(normalizedPlatform, model != null ? model.getCode() : null,
                 model != null ? model.getName() : null, model != null ? model.getModelType() : null));
+        family = normalizeFamily(StrUtil.isNotBlank(family) ? family : inferredFamily);
+        if ("generic".equals(family) && !"generic".equals(inferredFamily)) {
+            family = inferredFamily;
+        }
 
         String protocol = firstNonBlank(
                 model != null ? model.getModelProtocol() : null,
                 getString(config, "modelProtocol", "videoProtocol", "protocol", "requestProtocol", "request_protocol"));
-        protocol = normalizeProtocol(StrUtil.isNotBlank(protocol)
-                ? protocol
-                : inferProtocol(normalizedPlatform, family, model != null ? model.getModelType() : null));
+        String inferredProtocol = normalizeProtocol(inferProtocol(normalizedPlatform, family,
+                model != null ? model.getModelType() : null));
+        protocol = normalizeProtocol(StrUtil.isNotBlank(protocol) ? protocol : inferredProtocol);
+        if ("generic".equals(protocol) && !"generic".equals(inferredProtocol)) {
+            protocol = inferredProtocol;
+        }
 
         return new AiModelMetadata(platform, normalizedPlatform, family, protocol);
     }

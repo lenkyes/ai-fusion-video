@@ -16,8 +16,9 @@
    - `supportsReferenceVideos/Audios=false`：不传对应字段。禁止对不支持的参数做重复重试。
 6. **调用生成与更新**：
    - 首帧图选择：优先 `generatedImageUrl`，否则 `imageUrl`。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, referenceImageUrls, ratio, duration)`（默认比例 16:9，duration 直接传）。
+   - 调用 `generate_video(prompt, firstFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一镜头重复创建远端视频任务。**
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。
+   - 如果 `generate_video` 返回 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得再次调用 `generate_video` 重试同一镜头；直接保存/保留 videoPrompt 并报告失败原因。
 
 ## 2. 参考图与对白引用规则
 

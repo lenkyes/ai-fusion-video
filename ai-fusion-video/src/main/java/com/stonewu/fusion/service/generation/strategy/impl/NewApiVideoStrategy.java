@@ -287,6 +287,17 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 root.getStr("url"),
                 root.getStr("video_url"),
                 root.getStr("videoUrl"),
+                mediaUrl(root, new Object[]{"content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"data", "content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"data", "contents"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"data", "outputs"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"output", "content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"output", "contents"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"result", "content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                mediaUrl(root, new Object[]{"result", "contents"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
+                nestedFieldString(root, "content", "url"),
+                nestedFieldString(root, "content", "video_url"),
+                nestedFieldString(root, "content", "videoUrl"),
                 nestedFieldString(root, "data", "url"),
                 nestedFieldString(root, "data", "video_url"),
                 nestedFieldString(root, "data", "videoUrl"),
@@ -324,6 +335,16 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         String coverUrl = firstNonBlank(
                 root.getStr("cover_url"),
                 root.getStr("coverUrl"),
+                mediaUrl(root, new Object[]{"content"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"data", "content"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"data", "contents"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"data", "outputs"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"output", "content"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"output", "contents"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"result", "content"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                mediaUrl(root, new Object[]{"result", "contents"}, "cover_url", "coverUrl", "thumbnail_url", "thumbnailUrl", "poster_url", "posterUrl"),
+                nestedFieldString(root, "content", "cover_url"),
+                nestedFieldString(root, "content", "coverUrl"),
                 nestedFieldString(root, "data", "cover_url"),
                 nestedFieldString(root, "data", "coverUrl"),
                 nestedFieldString(root, "data", "output", "cover_url"),
@@ -354,6 +375,15 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         String firstFrameUrl = firstNonBlank(
                 root.getStr("first_frame_url"),
                 root.getStr("firstFrameUrl"),
+                mediaUrl(root, new Object[]{"content"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"data", "content"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"data", "contents"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"output", "content"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"output", "contents"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"result", "content"}, "first_frame_url", "firstFrameUrl"),
+                mediaUrl(root, new Object[]{"result", "contents"}, "first_frame_url", "firstFrameUrl"),
+                nestedFieldString(root, "content", "first_frame_url"),
+                nestedFieldString(root, "content", "firstFrameUrl"),
                 nestedFieldString(root, "data", "first_frame_url"),
                 nestedFieldString(root, "data", "firstFrameUrl"),
                 nestedFieldString(root, "data", "output", "first_frame_url"),
@@ -368,6 +398,15 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         String lastFrameUrl = firstNonBlank(
                 root.getStr("last_frame_url"),
                 root.getStr("lastFrameUrl"),
+                mediaUrl(root, new Object[]{"content"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"data", "content"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"data", "contents"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"output", "content"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"output", "contents"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"result", "content"}, "last_frame_url", "lastFrameUrl"),
+                mediaUrl(root, new Object[]{"result", "contents"}, "last_frame_url", "lastFrameUrl"),
+                nestedFieldString(root, "content", "last_frame_url"),
+                nestedFieldString(root, "content", "lastFrameUrl"),
                 nestedFieldString(root, "data", "last_frame_url"),
                 nestedFieldString(root, "data", "lastFrameUrl"),
                 nestedFieldString(root, "data", "output", "last_frame_url"),
@@ -381,6 +420,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
         Integer duration = firstPositive(
                 root.getInt("duration"),
+                nestedInteger(root, "content", "duration"),
                 nestedInteger(root, "data", "duration"),
                 metadata != null ? metadata.getInt("duration") : null,
                 objectField(root, "output", "metadata") != null
@@ -673,6 +713,61 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             return null;
         }
         return jsonObject.getStr(nestedField);
+    }
+
+    private String mediaUrl(Object root, Object[] path, String... fields) {
+        return mediaUrlValue(nestedValue(root, path), fields);
+    }
+
+    private String mediaUrlValue(Object value, String... fields) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                String resolved = mediaUrlValue(item, fields);
+                if (StrUtil.isNotBlank(resolved)) {
+                    return resolved;
+                }
+            }
+            return null;
+        }
+        if (value instanceof JSONObject jsonObject) {
+            for (String field : fields) {
+                String resolved = mediaUrlLeaf(jsonObject.get(field));
+                if (StrUtil.isNotBlank(resolved)) {
+                    return resolved;
+                }
+            }
+            return null;
+        }
+        String text = value.toString().trim();
+        return StrUtil.isNotBlank(text) ? text : null;
+    }
+
+    private String mediaUrlLeaf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof JSONObject jsonObject) {
+            return firstNonBlank(
+                    jsonObject.getStr("url"),
+                    jsonObject.getStr("video_url"),
+                    jsonObject.getStr("videoUrl"),
+                    jsonObject.getStr("file_url"),
+                    jsonObject.getStr("fileUrl"));
+        }
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                String resolved = mediaUrlLeaf(item);
+                if (StrUtil.isNotBlank(resolved)) {
+                    return resolved;
+                }
+            }
+            return null;
+        }
+        String text = value.toString().trim();
+        return StrUtil.isNotBlank(text) ? text : null;
     }
 
     private JSONObject firstObject(JSONObject... candidates) {
