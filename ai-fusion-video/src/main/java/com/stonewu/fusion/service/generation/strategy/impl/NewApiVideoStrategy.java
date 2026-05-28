@@ -37,9 +37,15 @@ import java.util.concurrent.TimeUnit;
 /**
  * New API 视频生成策略。
  * <p>
- * 对接官方通用视频接口：
+ * 默认对接官方通用视频接口：
  * POST /v1/video/generations
  * GET /v1/video/generations/{task_id}
+ * <p>
+ * Seedance 等内容生成任务接口默认走：
+ * POST /api/v3/contents/generations/tasks
+ * GET /api/v3/contents/generations/tasks/{task_id}
+ * <p>
+ * 也可以在模型 config 中通过 videoSubmitPath / videoQueryPathTemplate 显式覆盖。
  * <p>
  * 当前实现按官方通用字段适配为：文生视频 / 单图生视频。
  */
@@ -51,7 +57,9 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
     public static final String PLATFORM = "newapi";
 
     private static final String DEFAULT_BASE_URL = "https://docs.newapi.ai";
-    private static final String VIDEO_GENERATIONS_PATH = "/v1/video/generations";
+    private static final String DEFAULT_VIDEO_GENERATIONS_PATH = "/v1/video/generations";
+    private static final String CONTENT_GENERATION_TASKS_PATH = "/api/v3/contents/generations/tasks";
+    private static final String TASK_ID_PLACEHOLDER = "{task_id}";
     private static final long DEFAULT_POLL_INTERVAL_MILLIS = 10000L;
     private static final long DEFAULT_POLL_TIMEOUT_MILLIS = 30L * 60L * 1000L;
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
@@ -94,7 +102,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             }
 
             JSONObject requestBody = protocolAdapter.buildSubmitBody(protocolContext);
-            String platformTaskId = submitTask(apiConfig, requestBody);
+            String platformTaskId = submitTask(apiConfig, requestBody, modelConfig, protocolContext.metadata());
             item.setPlatformTaskId(platformTaskId);
             videoGenerationService.updateItem(item);
 
@@ -113,12 +121,13 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         AiModel model = resolveModel(task);
         ApiConfig apiConfig = resolveApiConfig(model);
         JSONObject modelConfig = parseModelConfig(model);
+        AiModelMetadata metadata = buildProtocolContext(model, apiConfig, task, modelConfig).metadata();
 
         List<VideoItem> items = videoGenerationService.listItems(task.getId());
         int successCount = 0;
 
         if (items.isEmpty()) {
-            NewApiVideoResult result = waitForTask(apiConfig, platformTaskId, modelConfig);
+            NewApiVideoResult result = waitForTask(apiConfig, platformTaskId, modelConfig, metadata);
             if (StrUtil.isBlank(result.videoUrl())) {
                 throw new BusinessException("New API 视频任务成功但未返回视频地址: " + platformTaskId);
             }
@@ -137,7 +146,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             }
 
             try {
-                NewApiVideoResult result = waitForTask(apiConfig, currentPlatformTaskId, modelConfig);
+                NewApiVideoResult result = waitForTask(apiConfig, currentPlatformTaskId, modelConfig, metadata);
                 if (StrUtil.isBlank(result.videoUrl())) {
                     item.setStatus(2);
                     item.setErrorMsg("New API 返回成功但无视频 URL");
@@ -168,9 +177,10 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         log.info("[NewApi Video] 视频生成完成: taskId={}, successCount={}", task.getTaskId(), successCount);
     }
 
-    private String submitTask(ApiConfig apiConfig, JSONObject requestBody) {
+    private String submitTask(ApiConfig apiConfig, JSONObject requestBody,
+                              JSONObject modelConfig, AiModelMetadata metadata) {
         Request request = new Request.Builder()
-                .url(resolveGenerationsUrl(apiConfig))
+                .url(resolveSubmitUrl(apiConfig, modelConfig, metadata))
                 .addHeader("Authorization", "Bearer " + apiConfig.getApiKey())
                 .addHeader("Content-Type", "application/json")
                 .post(RequestBody.create(requestBody.toString(), JSON_MEDIA_TYPE))
@@ -193,7 +203,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         }
     }
 
-    private NewApiVideoResult waitForTask(ApiConfig apiConfig, String platformTaskId, JSONObject modelConfig) {
+    private NewApiVideoResult waitForTask(ApiConfig apiConfig, String platformTaskId,
+                                          JSONObject modelConfig, AiModelMetadata metadata) {
         long pollIntervalMillis = getPositiveLong(modelConfig,
                 "pollIntervalMillis", "pollIntervalMs", "pollInterval") != null
                 ? getPositiveLong(modelConfig, "pollIntervalMillis", "pollIntervalMs", "pollInterval")
@@ -211,10 +222,11 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
         long deadline = System.currentTimeMillis() + timeoutMillis;
         while (System.currentTimeMillis() <= deadline) {
-            NewApiVideoResult result = queryTask(apiConfig, platformTaskId);
+            NewApiVideoResult result = queryTask(apiConfig, platformTaskId, modelConfig, metadata);
             String normalizedStatus = normalizeStatus(result.status());
 
-            if ("completed".equals(normalizedStatus) || "succeeded".equals(normalizedStatus)) {
+            if ("completed".equals(normalizedStatus) || "succeeded".equals(normalizedStatus)
+                    || "success".equals(normalizedStatus) || "done".equals(normalizedStatus)) {
                 return result;
             }
             if ("failed".equals(normalizedStatus) || "error".equals(normalizedStatus)
@@ -229,9 +241,10 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         throw new BusinessException("New API 视频任务轮询超时: " + platformTaskId);
     }
 
-    private NewApiVideoResult queryTask(ApiConfig apiConfig, String platformTaskId) {
+    private NewApiVideoResult queryTask(ApiConfig apiConfig, String platformTaskId,
+                                        JSONObject modelConfig, AiModelMetadata metadata) {
         Request request = new Request.Builder()
-                .url(resolveGenerationsUrl(apiConfig) + "/" + platformTaskId)
+                .url(resolveQueryUrl(apiConfig, modelConfig, metadata, platformTaskId))
                 .addHeader("Authorization", "Bearer " + apiConfig.getApiKey())
                 .get()
                 .build();
@@ -249,15 +262,23 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         }
     }
 
-    private NewApiVideoResult parseQueryResult(String responseBody) {
+    NewApiVideoResult parseQueryResult(String responseBody) {
         JSONObject root = parseObject(responseBody, "New API 视频任务查询响应不是合法 JSON");
         JSONObject metadata = firstObject(root.getJSONObject("metadata"),
+                nestedObject(root, "data", "metadata"),
+                nestedObject(root, "data", "result", "metadata"),
+                nestedObject(root, "data", "output", "metadata"),
                 objectField(root, "output", "metadata"),
                 objectField(root, "result", "metadata"),
                 arrayObjectField(root, "data", 0, "metadata"));
 
         String status = firstNonBlank(
                 root.getStr("status"),
+                nestedFieldString(root, "data", "status"),
+                nestedFieldString(root, "data", "task", "status"),
+                nestedFieldString(root, "data", "result", "status"),
+                nestedFieldString(root, "data", "output", "status"),
+                nestedFieldString(root, "task", "status"),
                 objectFieldString(root, "output", "status"),
                 objectFieldString(root, "result", "status"),
                 arrayObjectFieldString(root, "data", 0, "status"));
@@ -265,26 +286,80 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         String videoUrl = firstNonBlank(
                 root.getStr("url"),
                 root.getStr("video_url"),
+                root.getStr("videoUrl"),
+                nestedFieldString(root, "data", "url"),
+                nestedFieldString(root, "data", "video_url"),
+                nestedFieldString(root, "data", "videoUrl"),
+                nestedFieldString(root, "data", "output", "url"),
+                nestedFieldString(root, "data", "output", "video_url"),
+                nestedFieldString(root, "data", "output", "videoUrl"),
+                nestedFieldString(root, "data", "result", "url"),
+                nestedFieldString(root, "data", "result", "video_url"),
+                nestedFieldString(root, "data", "result", "videoUrl"),
+                nestedFieldString(root, "data", "content", "url"),
+                nestedFieldString(root, "data", "content", "video_url"),
+                nestedFieldString(root, "data", "contents", 0, "url"),
+                nestedFieldString(root, "data", "contents", 0, "video_url"),
+                nestedFieldString(root, "data", "videos", 0, "url"),
+                nestedFieldString(root, "data", "videos", 0, "video_url"),
+                nestedFieldString(root, "data", "outputs", 0, "url"),
+                nestedFieldString(root, "data", "outputs", 0, "video_url"),
                 objectFieldString(root, "output", "url"),
                 objectFieldString(root, "output", "video_url"),
+                objectFieldString(root, "output", "videoUrl"),
                 objectFieldString(root, "result", "url"),
                 objectFieldString(root, "result", "video_url"),
+                objectFieldString(root, "result", "videoUrl"),
+                nestedFieldString(root, "output", "contents", 0, "url"),
+                nestedFieldString(root, "output", "contents", 0, "video_url"),
+                nestedFieldString(root, "output", "videos", 0, "url"),
+                nestedFieldString(root, "output", "videos", 0, "video_url"),
+                nestedFieldString(root, "result", "contents", 0, "url"),
+                nestedFieldString(root, "result", "contents", 0, "video_url"),
+                nestedFieldString(root, "result", "videos", 0, "url"),
+                nestedFieldString(root, "result", "videos", 0, "video_url"),
                 arrayObjectFieldString(root, "data", 0, "url"),
                 arrayObjectFieldString(root, "data", 0, "video_url"));
 
         String coverUrl = firstNonBlank(
                 root.getStr("cover_url"),
                 root.getStr("coverUrl"),
+                nestedFieldString(root, "data", "cover_url"),
+                nestedFieldString(root, "data", "coverUrl"),
+                nestedFieldString(root, "data", "output", "cover_url"),
+                nestedFieldString(root, "data", "output", "coverUrl"),
+                nestedFieldString(root, "data", "result", "cover_url"),
+                nestedFieldString(root, "data", "result", "coverUrl"),
+                nestedFieldString(root, "data", "contents", 0, "cover_url"),
+                nestedFieldString(root, "data", "contents", 0, "coverUrl"),
+                nestedFieldString(root, "data", "videos", 0, "cover_url"),
+                nestedFieldString(root, "data", "videos", 0, "coverUrl"),
+                nestedFieldString(root, "data", "outputs", 0, "cover_url"),
+                nestedFieldString(root, "data", "outputs", 0, "coverUrl"),
                 objectFieldString(root, "output", "cover_url"),
                 objectFieldString(root, "output", "coverUrl"),
                 objectFieldString(root, "result", "cover_url"),
                 objectFieldString(root, "result", "coverUrl"),
+                nestedFieldString(root, "output", "contents", 0, "cover_url"),
+                nestedFieldString(root, "output", "contents", 0, "coverUrl"),
+                nestedFieldString(root, "output", "videos", 0, "cover_url"),
+                nestedFieldString(root, "output", "videos", 0, "coverUrl"),
+                nestedFieldString(root, "result", "contents", 0, "cover_url"),
+                nestedFieldString(root, "result", "contents", 0, "coverUrl"),
+                nestedFieldString(root, "result", "videos", 0, "cover_url"),
+                nestedFieldString(root, "result", "videos", 0, "coverUrl"),
                 arrayObjectFieldString(root, "data", 0, "cover_url"),
                 arrayObjectFieldString(root, "data", 0, "coverUrl"));
 
         String firstFrameUrl = firstNonBlank(
                 root.getStr("first_frame_url"),
                 root.getStr("firstFrameUrl"),
+                nestedFieldString(root, "data", "first_frame_url"),
+                nestedFieldString(root, "data", "firstFrameUrl"),
+                nestedFieldString(root, "data", "output", "first_frame_url"),
+                nestedFieldString(root, "data", "output", "firstFrameUrl"),
+                nestedFieldString(root, "data", "result", "first_frame_url"),
+                nestedFieldString(root, "data", "result", "firstFrameUrl"),
                 objectFieldString(root, "output", "first_frame_url"),
                 objectFieldString(root, "output", "firstFrameUrl"),
                 objectFieldString(root, "result", "first_frame_url"),
@@ -293,6 +368,12 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         String lastFrameUrl = firstNonBlank(
                 root.getStr("last_frame_url"),
                 root.getStr("lastFrameUrl"),
+                nestedFieldString(root, "data", "last_frame_url"),
+                nestedFieldString(root, "data", "lastFrameUrl"),
+                nestedFieldString(root, "data", "output", "last_frame_url"),
+                nestedFieldString(root, "data", "output", "lastFrameUrl"),
+                nestedFieldString(root, "data", "result", "last_frame_url"),
+                nestedFieldString(root, "data", "result", "lastFrameUrl"),
                 objectFieldString(root, "output", "last_frame_url"),
                 objectFieldString(root, "output", "lastFrameUrl"),
                 objectFieldString(root, "result", "last_frame_url"),
@@ -300,6 +381,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
         Integer duration = firstPositive(
                 root.getInt("duration"),
+                nestedInteger(root, "data", "duration"),
                 metadata != null ? metadata.getInt("duration") : null,
                 objectField(root, "output", "metadata") != null
                         ? objectField(root, "output", "metadata").getInt("duration") : null,
@@ -308,19 +390,33 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
         String errorMessage = firstNonBlank(
                 extractErrorMessage(root.get("error")),
+                extractErrorMessage(nestedValue(root, "data", "error")),
                 root.getStr("message"),
-                root.getStr("detail"));
+                root.getStr("detail"),
+                nestedFieldString(root, "data", "message"),
+                nestedFieldString(root, "data", "detail"));
 
         return new NewApiVideoResult(status, videoUrl, coverUrl, firstFrameUrl, lastFrameUrl, duration, errorMessage);
     }
 
-    private String extractTaskId(String responseBody) {
+    String extractTaskId(String responseBody) {
         JSONObject root = parseObject(responseBody, "New API 视频任务提交响应不是合法 JSON");
         return firstNonBlank(
                 root.getStr("task_id"),
+                root.getStr("taskId"),
                 root.getStr("id"),
                 objectFieldString(root, "data", "task_id"),
-                objectFieldString(root, "data", "id"));
+                objectFieldString(root, "data", "taskId"),
+                objectFieldString(root, "data", "id"),
+                nestedFieldString(root, "data", "task", "task_id"),
+                nestedFieldString(root, "data", "task", "taskId"),
+                nestedFieldString(root, "data", "task", "id"),
+                nestedFieldString(root, "data", "result", "task_id"),
+                nestedFieldString(root, "data", "result", "taskId"),
+                nestedFieldString(root, "data", "result", "id"),
+                objectFieldString(root, "result", "task_id"),
+                objectFieldString(root, "result", "taskId"),
+                objectFieldString(root, "result", "id"));
     }
 
     private AiModel resolveModel(VideoTask task) {
@@ -360,8 +456,30 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         }
     }
 
-    private String resolveGenerationsUrl(ApiConfig apiConfig) {
-        return normalizeRootBaseUrl(apiConfig.getApiUrl()) + VIDEO_GENERATIONS_PATH;
+    String resolveSubmitUrl(ApiConfig apiConfig, JSONObject modelConfig, AiModelMetadata metadata) {
+        String configuredPath = getString(modelConfig,
+                "videoSubmitUrl", "submitUrl", "taskSubmitUrl", "generationSubmitUrl",
+                "videoSubmitPath", "submitPath", "taskSubmitPath", "generationSubmitPath");
+        String submitPath = StrUtil.blankToDefault(configuredPath, defaultSubmitPath(metadata));
+        return resolveEndpointUrl(apiConfig, submitPath, null);
+    }
+
+    String resolveQueryUrl(ApiConfig apiConfig, JSONObject modelConfig,
+                           AiModelMetadata metadata, String platformTaskId) {
+        String configuredPath = getString(modelConfig,
+                "videoQueryUrl", "queryUrl", "taskQueryUrl", "generationQueryUrl",
+                "videoQueryPathTemplate", "queryPathTemplate", "taskQueryPathTemplate", "generationQueryPathTemplate",
+                "videoQueryPath", "queryPath", "taskQueryPath", "generationQueryPath");
+        String queryPath = StrUtil.blankToDefault(configuredPath, defaultSubmitPath(metadata) + "/" + TASK_ID_PLACEHOLDER);
+        return resolveEndpointUrl(apiConfig, queryPath, platformTaskId);
+    }
+
+    private String defaultSubmitPath(AiModelMetadata metadata) {
+        if (metadata != null && ("seedance".equals(metadata.effectiveFamily())
+                || "seedance".equals(metadata.effectiveProtocol()))) {
+            return CONTENT_GENERATION_TASKS_PATH;
+        }
+        return DEFAULT_VIDEO_GENERATIONS_PATH;
     }
 
     private NewApiVideoProtocolContext buildProtocolContext(AiModel model, ApiConfig apiConfig,
@@ -376,6 +494,42 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             normalized = normalized.substring(0, normalized.length() - 3);
         }
         return normalized;
+    }
+
+    private String resolveEndpointUrl(ApiConfig apiConfig, String pathOrUrl, String platformTaskId) {
+        String resolved = replaceTaskId(StrUtil.trim(pathOrUrl), platformTaskId);
+        if (StrUtil.startWithIgnoreCase(resolved, "http://")
+                || StrUtil.startWithIgnoreCase(resolved, "https://")) {
+            return resolved;
+        }
+
+        String rootBaseUrl = normalizeRootBaseUrl(apiConfig != null ? apiConfig.getApiUrl() : null);
+        String normalizedPath = StrUtil.blankToDefault(resolved, DEFAULT_VIDEO_GENERATIONS_PATH);
+        if (!normalizedPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+
+        String lowerBaseUrl = rootBaseUrl.toLowerCase();
+        String lowerPath = normalizedPath.toLowerCase();
+        if (lowerBaseUrl.endsWith("/api/v3") && lowerPath.startsWith("/api/v3/")) {
+            normalizedPath = normalizedPath.substring("/api/v3".length());
+        }
+        return rootBaseUrl + normalizedPath;
+    }
+
+    private String replaceTaskId(String value, String platformTaskId) {
+        if (StrUtil.isBlank(value) || StrUtil.isBlank(platformTaskId)) {
+            return value;
+        }
+        String encodedTaskId = platformTaskId.replace("/", "%2F");
+        String replaced = value.replace(TASK_ID_PLACEHOLDER, encodedTaskId)
+                .replace("{taskId}", encodedTaskId)
+                .replace("{id}", encodedTaskId)
+                .replace(":id", encodedTaskId);
+        if (replaced.equals(value)) {
+            replaced = value.replaceAll("/+$", "") + "/" + encodedTaskId;
+        }
+        return replaced;
     }
 
     private String extractErrorMessage(String responseBody) {
@@ -441,6 +595,53 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             return null;
         }
         return jsonObject.getStr(nestedField);
+    }
+
+    private Object nestedValue(Object root, Object... path) {
+        Object current = root;
+        for (Object part : path) {
+            if (current == null) {
+                return null;
+            }
+            if (part instanceof Integer index) {
+                if (!(current instanceof JSONArray array) || array.size() <= index) {
+                    return null;
+                }
+                current = array.get(index);
+                continue;
+            }
+            if (!(current instanceof JSONObject jsonObject)) {
+                return null;
+            }
+            current = jsonObject.get(part.toString());
+        }
+        return current;
+    }
+
+    private JSONObject nestedObject(Object root, Object... path) {
+        Object value = nestedValue(root, path);
+        return value instanceof JSONObject jsonObject ? jsonObject : null;
+    }
+
+    private String nestedFieldString(Object root, Object... path) {
+        Object value = nestedValue(root, path);
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString().trim();
+        return StrUtil.isNotBlank(text) ? text : null;
+    }
+
+    private Integer nestedInteger(Object root, Object... path) {
+        Object value = nestedValue(root, path);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return value instanceof Number number ? number.intValue() : Integer.parseInt(value.toString().trim());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private JSONObject arrayObjectField(JSONObject root, String arrayField, int index, String nestedField) {
@@ -525,6 +726,23 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         return null;
     }
 
+    private String getString(JSONObject config, String... keys) {
+        if (config == null) {
+            return null;
+        }
+        for (String key : keys) {
+            Object value = config.get(key);
+            if (value == null) {
+                continue;
+            }
+            String text = value.toString().trim();
+            if (StrUtil.isNotBlank(text)) {
+                return text;
+            }
+        }
+        return null;
+    }
+
     private Integer firstPositive(Integer... values) {
         for (Integer value : values) {
             if (value != null && value > 0) {
@@ -556,8 +774,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
         }
     }
 
-    private record NewApiVideoResult(String status, String videoUrl, String coverUrl,
-                                     String firstFrameUrl, String lastFrameUrl,
-                                     Integer duration, String errorMessage) {
+    record NewApiVideoResult(String status, String videoUrl, String coverUrl,
+                             String firstFrameUrl, String lastFrameUrl,
+                             Integer duration, String errorMessage) {
     }
 }
