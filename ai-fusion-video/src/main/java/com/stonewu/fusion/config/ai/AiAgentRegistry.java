@@ -1,8 +1,5 @@
 package com.stonewu.fusion.config.ai;
 
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -10,6 +7,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
 
 /**
  * AI Agent 注册表
@@ -496,16 +496,30 @@ public class AiAgentRegistry {
                                                                 .displayName("为镜头生成视频")
                                                                 .description("""
                                                                                 为单个分镜镜头生成AI视频并自动保存。每次调用只处理一个镜头，可在同一轮同时调用多个实例并行执行。
+                                                                                主 Agent 必须先整理统一的 consistencyContext，并在每次调用中传给子 Agent；即使只生成一个镜头，也要基于项目资产和该镜头所在场次生成一致性上下文，确保角色、场景、道具保持一致。
 
                                                                                 调用时 message 必须包含以下信息（每行一个键值对）：
                                                                                 - storyboardItemId: 分镜条目ID（数字，必传）
                                                                                 - projectId: 项目ID（数字，必传）
+                                                                                - promptOnly: true/false（仅生成提示词时传 true）
+                                                                                - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
 
-                                                                                message 格式示例：
+                                                                                message 格式模板（具体内容必须来自 get_project / get_storyboard_scene_items 查询结果，不要照抄占位符）：
                                                                                 请为分镜镜头生成视频。
-                                                                                storyboardItemId: 42
-                                                                                projectId: 5""")
+                                                                                storyboardItemId: {storyboardItemId}
+                                                                                projectId: {projectId}
+                                                                                promptOnly: false
+                                                                                consistencyContext:
+                                                                                styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
+                                                                                referenceOrderPolicy: {风格参考图（如有）→ 角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
+                                                                                characterLocks:
+                                                                                - {角色名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定外观锚点}
+                                                                                sceneLocks:
+                                                                                - {场景名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, environment={来自资产/分镜的稳定空间结构和光线锚点}
+                                                                                propLocks:
+                                                                                - {道具名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定道具外观锚点}
+                                                                                negativeConsistencyRules: 保持同一角色外貌和服装、同一场景空间结构、同一道具外观；不新增无关人物；不保留参考图白底或边框""")
                                                                 .refAgentType("storyboard_video_executor")
                                                                 .build()))
                                 .systemPrompt(loadPrompt("storyboard-video-gen.system.md"))

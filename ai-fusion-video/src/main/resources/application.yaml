@@ -45,6 +45,13 @@ server:
 app:
   storage:
     local-base-path: ./data/media
+  ai:
+    # 批量生视频会长时间等待模型队列，需大于单个视频工具的等待时间。
+    agent-tool-timeout-minutes: ${AI_AGENT_TOOL_TIMEOUT_MINUTES:130}
+  generation:
+    video:
+      # Agent 工具同步等待生视频任务完成的时间；10 个镜头在单并发队列下通常需要远超 10 分钟。
+      agent-tool-wait-timeout-ms: ${VIDEO_AGENT_TOOL_WAIT_TIMEOUT_MS:7200000}
 
 video:
   compose:

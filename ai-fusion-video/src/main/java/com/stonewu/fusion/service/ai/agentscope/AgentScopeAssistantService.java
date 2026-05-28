@@ -31,6 +31,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
@@ -74,6 +75,9 @@ public class AgentScopeAssistantService {
     private final StringRedisTemplate stringRedisTemplate;
     private final AiStreamRedisService aiStreamRedisService;
     private final javax.sql.DataSource dataSource;
+
+    @Value("${app.ai.agent-tool-timeout-minutes:130}")
+    private long agentToolTimeoutMinutes;
 
     /** AgentScope MySQL Session（子 Agent 会话持久化） */
     private MysqlSession mysqlSession;
@@ -709,7 +713,7 @@ public class AgentScopeAssistantService {
         Toolkit toolkit = new Toolkit(ToolkitConfig.builder()
                 .parallel(true) // 并行执行多工具
                 .executionConfig(ExecutionConfig.builder()
-                        .timeout(Duration.ofMinutes(20))
+                        .timeout(resolveToolExecutionTimeout())
                         .build())
                 .build());
 
@@ -789,7 +793,7 @@ public class AgentScopeAssistantService {
                             Toolkit subToolkit = new Toolkit(ToolkitConfig.builder()
                                     .parallel(true)
                                     .executionConfig(ExecutionConfig.builder()
-                                            .timeout(Duration.ofMinutes(20))
+                                            .timeout(resolveToolExecutionTimeout())
                                             .build())
                                     .build());
                             for (ToolExecutor subTool : finalSubTools) {
@@ -992,6 +996,11 @@ public class AgentScopeAssistantService {
             return false;
         }
         return Boolean.TRUE.equals(stringRedisTemplate.hasKey(CANCEL_FLAG_KEY + conversationId));
+    }
+
+    private Duration resolveToolExecutionTimeout() {
+        long minutes = agentToolTimeoutMinutes > 0 ? agentToolTimeoutMinutes : 130;
+        return Duration.ofMinutes(minutes);
     }
 
     private void clearCancelFlag(String conversationId) {

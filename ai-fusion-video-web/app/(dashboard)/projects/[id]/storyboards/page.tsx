@@ -708,6 +708,7 @@ export default function StoryboardTabPage() {
           context: {
             selectedStoryboardItemIds: [itemId],
             storyboardId: storyboard.id,
+            overwriteExistingVideo: true,
           },
         },
       });

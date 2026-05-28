@@ -264,6 +264,7 @@ function SceneAssetPanel({
           selectedStoryboardItemIds: selectedItemIds,
           storyboardId: storyboard.id,
           promptOnly: promptOnly || false,
+          overwriteExistingVideo: true,
         },
       },
       onComplete: () => {

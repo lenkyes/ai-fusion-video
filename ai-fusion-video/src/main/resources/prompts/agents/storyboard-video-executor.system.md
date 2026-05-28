@@ -4,10 +4,11 @@
 
 ## 1. 业务流程与输入约束
 
-1. **提取参数**：仅解析输入消息中的 `storyboardItemId` 和 `projectId`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
+1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）与 `referenceImageUrl`（风格参考图）。
 3. **获取镜头与资产**：调用 `get_storyboard_scene_items` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
-   - **排序规则**：角色 → 道具 → 场景（有首帧图时场景可省略），最多 5 张。
+   - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认风格参考图 → 角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），最多 5 张。
+   - 同一 assetItemId 在不同镜头中必须使用同一张 imageUrl 和同一套外观描述，不要因为镜头不同改写成另一个人/另一个场景。
 4. **识别对白**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt。
 5. **查询模型能力**：调用 `get_generation_model_capabilities` 获取当前视频模型支持情况，并进行参数裁剪：
    - `supportsFirstFrame=false`：不传 `firstFrameImageUrl`，在 prompt 中描述静态开场画面。
@@ -40,6 +41,15 @@
 ### A. 风格融合与背景剥离 (核心)
 1. **风格融合**：以镜头剧本的场景描述和事件为唯一准则。仅从画风 `description` 中提取艺术风格和修饰词，**彻底剔除画风词中具体的背景、环境、场景或多余的主体描述**（避免与镜头本身的场景冲突）。
 2. **纯白背景剥离**：由于角色/道具参考图是在纯白背景中生成的，在 prompt 中引用这些资产（`图片N`）时，**必须显式命令模型抠除并剥离参考图中的纯白背景，自然融入到镜头场景中**，例如：`参考图片2中的角色形象（抠除原本的纯白色背景，自然融入到下述场景中）`。严禁在视频中保留任何白色背景、白色切片或白色边框。
+
+### A2. 一致性锁定 (必须执行)
+1. 如果输入包含 `consistencyContext`，必须把其中与当前镜头有关的 `styleLock`、`characterLocks`、`sceneLocks`、`propLocks`、`continuityLocks` 和 `negativeConsistencyRules` 融入 video prompt。
+2. 如果输入没有 `consistencyContext`，必须根据 `get_project` 和 `get_storyboard_scene_items` 的返回临时建立当前镜头的一致性锁定，不能只凭镜头 content 自由发挥。
+3. 对每个当前镜头出现的角色，prompt 必须明确“保持 assetItemId=... 对应角色的同一张脸、发型、年龄、体型、服装和主要配色”。如果该角色有参考图且模型支持参考图，要用图片编号指代；如果模型不支持参考图，要把 assetDescription / assetProperties / itemProperties / itemPrompt 中的稳定外观转写成自然语言。
+4. 对当前镜头的场景，prompt 必须明确“保持同一场景的空间结构、时间段、核心陈设、光线方向和色彩氛围”。如果该场景有参考图且模型支持参考图，要用图片编号指代；如果模型不支持参考图，要文字描述。
+5. 对当前镜头的关键道具，prompt 必须明确“保持同一道具的材质、颜色、形状和尺寸关系”。
+6. 不要让参考图中的纯白背景、摆拍构图、边框、水印或无关主体进入视频。
+7. 不要为了画面丰富而新增未在镜头或资产中出现的人物。
 
 ### B. 结构与格式要求
 - 使用**中文**自然语言叙述，不堆砌关键词，篇幅 2-5 句（复杂场景不超过 8 句）。

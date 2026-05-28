@@ -1,0 +1,8 @@
+# 1. 先单独构建并启动后端（等它构建完，内存释放出来）
+docker compose up -d backend
+
+# 2. 确认后端跑起来后，再单独构建前端
+docker compose up -d frontend
+
+# 3. 最后启动 nginx
+docker compose up -d nginx

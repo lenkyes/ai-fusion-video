@@ -21,7 +21,16 @@ export function VideoGenDialog({
   onConfirm,
 }: VideoGenDialogProps) {
   const defaultSelected = useMemo(
-    () => new Set(items.map((item) => item.id)),
+    () => {
+      const missingVideoIds = items
+        .filter((item) => !(item.videoUrl || item.generatedVideoUrl))
+        .map((item) => item.id);
+      return new Set(
+        missingVideoIds.length > 0
+          ? missingVideoIds
+          : items.map((item) => item.id)
+      );
+    },
     [items]
   );
   const [selectedOverride, setSelectedOverride] = useState<Set<number> | null>(null);

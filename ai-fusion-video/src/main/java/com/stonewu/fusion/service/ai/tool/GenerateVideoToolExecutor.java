@@ -15,6 +15,7 @@ import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -36,13 +37,16 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     /** 模型类型常量：视频生成 */
     private static final int MODEL_TYPE_VIDEO = 3;
 
-    /** 同步等待超时时间（10 分钟，视频生成耗时较长） */
-    private static final long WAIT_TIMEOUT_MS = 10 * 60 * 1000L;
+    /** 默认同步等待超时时间（2 小时，给批量镜头排队留足时间） */
+    private static final long DEFAULT_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000L;
 
     private final AiModelService aiModelService;
     private final VideoGenerationService videoGenerationService;
     private final VideoGenerationConsumer videoGenerationConsumer;
     private final GenerationModelCapabilityService generationModelCapabilityService;
+
+    @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
+    private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
 
     @Override
     public String getToolName() {
@@ -195,20 +199,22 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .ratio(ratio)
                     .duration(duration)
                     .cameraFixed(cameraFixed)
-                        .modelId(model.getId())
+                    .modelId(model.getId())
                     .count(1)
                     .userId(context.getUserId())
                     .build();
 
-                    generationModelCapabilityService.validateVideoTask(model, task);
+            generationModelCapabilityService.validateVideoTask(model, task);
+            long effectiveWaitTimeoutMs = resolveWaitTimeoutMs();
 
-                    log.info("[generate_video] 提交生视频任务: prompt={}, mode={}, ratio={}, duration={}s, modelId={}, modelCode={}, 首帧: {}, 参考图: {}张",
-                        StrUtil.sub(prompt, 0, 80), generateMode, ratio, duration, model.getId(), model.getCode(),
+            log.info("[generate_video] 提交生视频任务: prompt={}, mode={}, ratio={}, duration={}s, modelId={}, modelCode={}, waitTimeout={}ms, 首帧: {}, 参考图: {}张",
+                    StrUtil.sub(prompt, 0, 80), generateMode, ratio, duration, model.getId(), model.getCode(),
+                    effectiveWaitTimeoutMs,
                     firstFrameImageUrl != null ? "有" : "无",
                     referenceImageUrlList.size());
 
             // 提交到队列并同步等待结果
-            VideoTask completed = videoGenerationConsumer.submitAndWait(task, WAIT_TIMEOUT_MS);
+            VideoTask completed = videoGenerationConsumer.submitAndWait(task, effectiveWaitTimeoutMs);
 
             // 从完成的任务中获取生成的视频 URL
             List<VideoItem> items = videoGenerationService.listItems(completed.getId());
@@ -267,6 +273,10 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private String describeCurrentModelCapability() {
         AiModel model = resolvePreferredModelOrNull();
         return generationModelCapabilityService.describeVideoCapability(model);
+    }
+
+    private long resolveWaitTimeoutMs() {
+        return waitTimeoutMs > 0 ? waitTimeoutMs : DEFAULT_WAIT_TIMEOUT_MS;
     }
 
     private String errorResult(String message) {
