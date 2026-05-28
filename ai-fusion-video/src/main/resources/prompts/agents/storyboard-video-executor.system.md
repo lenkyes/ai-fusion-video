@@ -6,7 +6,7 @@
 
 1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）与 `referenceImageUrl`（风格参考图）。
-3. **获取镜头与资产**：调用 `get_storyboard_scene_items` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
+3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
    - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认风格参考图 → 角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），最多 5 张。
    - 同一 assetItemId 在不同镜头中必须使用同一张 imageUrl 和同一套外观描述，不要因为镜头不同改写成另一个人/另一个场景。
 4. **识别对白**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt。

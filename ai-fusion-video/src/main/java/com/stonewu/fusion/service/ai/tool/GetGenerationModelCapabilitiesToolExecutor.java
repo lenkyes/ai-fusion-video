@@ -8,6 +8,7 @@ import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
+import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,7 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
 
     private final AiModelService aiModelService;
     private final GenerationModelCapabilityService generationModelCapabilityService;
+    private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
 
     @Override
     public String getToolName() {
@@ -128,17 +130,26 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
         }
 
         JSONObject snapshot = generationModelCapabilityService.buildVideoCapabilitySnapshot(resolvedModel.model());
+        boolean strategySupported = videoGenerationStrategyRouter.supports(resolvedModel.model());
         boolean supportsFirstFrame = snapshot.getBool("supportsFirstFrame", false);
         boolean supportsReferenceImages = snapshot.getBool("supportsReferenceImages", false);
         boolean supportsReferenceVideos = snapshot.getBool("supportsReferenceVideos", false);
         boolean supportsReferenceAudios = snapshot.getBool("supportsReferenceAudios", false);
 
         snapshot.set("selectionSource", resolvedModel.selectionSource());
-        snapshot.set("toolGuidance", buildVideoGuidance(
-                supportsFirstFrame,
-                supportsReferenceImages,
-                supportsReferenceVideos,
-                supportsReferenceAudios));
+        snapshot.set("strategySupported", strategySupported);
+        if (!strategySupported) {
+            String platform = generationModelCapabilityService.resolveModelPlatform(resolvedModel.model());
+            snapshot.set("toolGuidance", "当前视频模型的平台 " + platform
+                    + " 没有已注册的视频生成策略，请不要调用 generate_video。请切换到 DashScope、火山引擎、NewAPI 或 Google Flow 等受支持的视频模型。");
+            snapshot.set("summary", "当前视频模型没有可用视频生成策略。");
+        } else {
+            snapshot.set("toolGuidance", buildVideoGuidance(
+                    supportsFirstFrame,
+                    supportsReferenceImages,
+                    supportsReferenceVideos,
+                    supportsReferenceAudios));
+        }
         return snapshot;
     }
 
@@ -167,10 +178,22 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
     private ResolvedModel resolvePreferredModel(int modelType) {
         AiModel defaultModel = aiModelService.getDefaultByType(modelType);
         if (defaultModel != null) {
-            return new ResolvedModel(defaultModel, "default_model");
+            if (modelType != MODEL_TYPE_VIDEO || videoGenerationStrategyRouter.supports(defaultModel)) {
+                return new ResolvedModel(defaultModel, "default_model");
+            }
         }
 
         List<AiModel> models = aiModelService.getListByType(modelType);
+        if (modelType == MODEL_TYPE_VIDEO) {
+            for (AiModel model : models) {
+                if (videoGenerationStrategyRouter.supports(model)) {
+                    return new ResolvedModel(model, "first_strategy_supported_fallback");
+                }
+            }
+            if (defaultModel != null) {
+                return new ResolvedModel(defaultModel, "unsupported_default_model");
+            }
+        }
         if (!models.isEmpty()) {
             return new ResolvedModel(models.get(0), "first_enabled_fallback");
         }

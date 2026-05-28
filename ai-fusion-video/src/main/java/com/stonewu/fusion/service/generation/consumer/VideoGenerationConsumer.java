@@ -191,6 +191,17 @@ public class VideoGenerationConsumer {
             videoGenerationService.updateStatus(task.getId(), 3, "视频模型不存在或已禁用");
             return;
         }
+        if (!videoGenerationStrategyRouter.supports(model)) {
+            String platform;
+            try {
+                platform = generationModelCapabilityService.resolveModelPlatform(model);
+            } catch (Exception e) {
+                platform = "未知平台";
+            }
+            videoGenerationService.updateStatus(task.getId(), 3,
+                    "当前视频模型平台 " + platform + " 没有可用的视频生成策略，请切换到支持的视频模型");
+            return;
+        }
 
         try {
             VideoGenerationStrategy strategy = videoGenerationStrategyRouter.resolve(model);

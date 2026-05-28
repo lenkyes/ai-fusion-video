@@ -13,6 +13,7 @@ import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
+import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * AI 生视频工具（generate_video）
@@ -44,6 +46,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private final VideoGenerationService videoGenerationService;
     private final VideoGenerationConsumer videoGenerationConsumer;
     private final GenerationModelCapabilityService generationModelCapabilityService;
+    private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
 
     @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
     private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
@@ -252,14 +255,26 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
      */
     private AiModel resolvePreferredModel() {
         AiModel defaultModel = aiModelService.getDefaultByType(MODEL_TYPE_VIDEO);
-        if (defaultModel != null) {
+        if (isSupportedVideoModel(defaultModel)) {
             return defaultModel;
         }
         List<AiModel> videoModels = aiModelService.getListByType(MODEL_TYPE_VIDEO);
-        if (!videoModels.isEmpty()) {
-            return videoModels.get(0);
+        for (AiModel model : videoModels) {
+            if (isSupportedVideoModel(model)) {
+                if (defaultModel != null && !Objects.equals(model.getId(), defaultModel.getId())) {
+                    log.warn("[generate_video] 默认视频模型没有可用策略，已回退到支持的视频模型: defaultModelId={}, fallbackModelId={}",
+                            defaultModel.getId(), model.getId());
+                }
+                return model;
+            }
         }
-        throw new IllegalStateException("未配置可用的视频生成模型");
+        String unsupportedDefault = defaultModel != null
+                ? " 当前默认视频模型 " + modelLabel(defaultModel) + " 的平台为 "
+                        + generationModelCapabilityService.resolveModelPlatform(defaultModel) + "，没有对应的视频生成策略。"
+                : "";
+        throw new IllegalStateException("未配置可用的视频生成模型。" + unsupportedDefault
+                + " 请在设置中配置 DashScope、火山引擎、NewAPI 或 Google Flow 等受支持的视频模型，并设为默认视频模型。"
+                + " 当前已注册的视频策略: " + videoGenerationStrategyRouter.supportedPlatformsText());
     }
 
     private AiModel resolvePreferredModelOrNull() {
@@ -273,6 +288,17 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private String describeCurrentModelCapability() {
         AiModel model = resolvePreferredModelOrNull();
         return generationModelCapabilityService.describeVideoCapability(model);
+    }
+
+    private boolean isSupportedVideoModel(AiModel model) {
+        return model != null && videoGenerationStrategyRouter.supports(model);
+    }
+
+    private String modelLabel(AiModel model) {
+        if (model == null) {
+            return "未命名模型";
+        }
+        return StrUtil.blankToDefault(model.getName(), model.getCode());
     }
 
     private long resolveWaitTimeoutMs() {

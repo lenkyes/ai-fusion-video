@@ -49,6 +49,23 @@ public class VideoGenerationStrategyRouter {
         throw new BusinessException("未找到匹配的视频生成策略: " + platform);
     }
 
+    public boolean supports(AiModel model) {
+        if (model == null) {
+            return false;
+        }
+        try {
+            String platform = aiModelMetadataResolver.resolvePlatform(model);
+            String normalizedPlatform = aiModelMetadataResolver.normalizePlatform(platform);
+            return StrUtil.isNotBlank(normalizedPlatform) && getStrategyMap().containsKey(normalizedPlatform);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public String supportedPlatformsText() {
+        return String.join(", ", getStrategyMap().keySet());
+    }
+
     private Map<String, VideoGenerationStrategy> getStrategyMap() {
         if (strategyMap == null) {
             synchronized (this) {

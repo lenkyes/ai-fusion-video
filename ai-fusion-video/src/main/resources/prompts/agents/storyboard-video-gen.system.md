@@ -14,7 +14,7 @@
 1. 首先调用 `get_project` 获取项目基本信息、画风描述、画面比例和风格参考图
 2. 解析上下文中的 `selectedStoryboardItemIds`（前端传入的选中镜头ID列表）
 3. 如果没有指定镜头ID，通过 `get_storyboard` 获取所有镜头；如果指定了镜头ID，只处理这些镜头
-4. 对每个目标镜头调用 `get_storyboard_scene_items(storyboardItemId)`，获取目标镜头、前后镜头、characterRefs、sceneRef、propRefs 和已生成视频状态
+4. 对每个目标镜头调用 `get_storyboard_scene_items({"storyboardItemId": 目标镜头ID})`，获取目标镜头、前后镜头、characterRefs、sceneRef、propRefs 和已生成视频状态；不要把镜头ID填入 storyboardSceneId 或 sceneId
 5. 在调用子 Agent 前，先整理一份本批次共享的 `consistencyContext`，并在每一次 `generate_storyboard_video` 调用中原样传入
 6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly 和同一份 consistencyContext
 7. 可以同时调用多个子 Agent 实例并行处理不同镜头

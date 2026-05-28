@@ -60,6 +60,8 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
                 3. 兼容旧参数 sceneId，但推荐使用 storyboardSceneId
 
                 如果同时提供 storyboardItemId 和 storyboardSceneId，会优先使用 storyboardItemId 自动定位所在场次。
+                如果误把分镜条目ID填入 storyboardSceneId/sceneId，本工具会自动识别并按 storyboardItemId 重新查询，
+                避免因大模型填错参数名导致“分镜场次不存在”。
 
                 返回的每个镜头包含完整信息：画面内容、景别、运镜、对白、音效、图片URL、视频URL等。
                 可用于获取上下文信息（上一个/下一个镜头），以便生成连贯的视频提示词。
@@ -106,6 +108,7 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
             Long storyboardSceneId = positiveOrNull(params.getLong("storyboardSceneId"));
             Long sceneId = positiveOrNull(params.getLong("sceneId"));
             Long storyboardItemId = positiveOrNull(params.getLong("storyboardItemId"));
+            Long sceneLikeId = storyboardSceneId != null ? storyboardSceneId : sceneId;
 
             if (storyboardSceneId == null) {
                 storyboardSceneId = sceneId;
@@ -120,10 +123,7 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
             Long targetItemId = storyboardItemId;
             if (storyboardItemId != null) {
                 targetItem = storyboardService.getItemById(storyboardItemId);
-                storyboardSceneId = positiveOrNull(targetItem.getStoryboardSceneId());
-                if (storyboardSceneId == null) {
-                    return buildFallbackItemsResult(targetItem, "目标镜头未关联有效分镜场次，已降级为按镜头上下文查询");
-                }
+                return buildResultForTargetItem(targetItem, null);
             }
 
             try {
@@ -132,17 +132,23 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
 
                 // 查询该场次下的所有镜头
                 List<StoryboardItem> items = storyboardService.listItemsByScene(storyboardSceneId);
+                StoryboardItem sceneLikeItem = findItemOrNull(sceneLikeId);
+                if (sceneLikeItem != null && items.stream().noneMatch(item -> sceneLikeId.equals(item.getId()))) {
+                    return buildResultForTargetItem(sceneLikeItem,
+                            "输入疑似将 storyboardItemId 填入了 storyboardSceneId/sceneId，已自动按镜头ID查询");
+                }
                 if (targetItemId != null && items.stream().noneMatch(item -> targetItemId.equals(item.getId()))) {
                     return buildFallbackItemsResult(targetItem, "关联场次列表中没有目标镜头，已降级为按镜头上下文查询");
                 }
 
                 return buildItemsResult(scene, targetItemId, items, null, null);
             } catch (Exception sceneError) {
-                if (targetItem != null) {
-                    log.warn("[get_storyboard_scene_items] 目标镜头关联场次查询失败，降级按镜头上下文返回: storyboardItemId={}, storyboardSceneId={}, reason={}",
-                            targetItemId, storyboardSceneId, sceneError.getMessage());
-                    return buildFallbackItemsResult(targetItem,
-                            "关联分镜场次查询失败，已降级为按镜头上下文查询: " + sceneError.getMessage());
+                StoryboardItem sceneLikeItem = findItemOrNull(sceneLikeId);
+                if (sceneLikeItem != null) {
+                    log.warn("[get_storyboard_scene_items] 场次查询失败，输入疑似镜头ID，自动改按镜头查询: inputId={}, reason={}",
+                            sceneLikeId, sceneError.getMessage());
+                    return buildResultForTargetItem(sceneLikeItem,
+                            "输入疑似将 storyboardItemId 填入了 storyboardSceneId/sceneId，已自动按镜头ID查询");
                 }
                 throw sceneError;
             }
@@ -150,6 +156,29 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
         } catch (Exception e) {
             log.error("[get_storyboard_scene_items] 查询失败", e);
             return errorResult("查询失败: " + e.getMessage());
+        }
+    }
+
+    private String buildResultForTargetItem(StoryboardItem targetItem, String warning) {
+        Long storyboardSceneId = positiveOrNull(targetItem.getStoryboardSceneId());
+        if (storyboardSceneId == null) {
+            return buildFallbackItemsResult(targetItem, appendWarning(
+                    "目标镜头未关联有效分镜场次，已降级为按镜头上下文查询", warning));
+        }
+
+        try {
+            StoryboardScene scene = storyboardService.getSceneById(storyboardSceneId);
+            List<StoryboardItem> items = storyboardService.listItemsByScene(storyboardSceneId);
+            if (items.stream().noneMatch(item -> targetItem.getId().equals(item.getId()))) {
+                return buildFallbackItemsResult(targetItem, appendWarning(
+                        "关联场次列表中没有目标镜头，已降级为按镜头上下文查询", warning));
+            }
+            return buildItemsResult(scene, targetItem.getId(), items, null, warning);
+        } catch (Exception sceneError) {
+            log.warn("[get_storyboard_scene_items] 目标镜头关联场次查询失败，降级按镜头上下文返回: storyboardItemId={}, storyboardSceneId={}, reason={}",
+                    targetItem.getId(), storyboardSceneId, sceneError.getMessage());
+            return buildFallbackItemsResult(targetItem, appendWarning(
+                    "关联分镜场次查询失败，已降级为按镜头上下文查询: " + sceneError.getMessage(), warning));
         }
     }
 
@@ -302,6 +331,25 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
 
     private Long positiveOrNull(Long value) {
         return value != null && value > 0 ? value : null;
+    }
+
+    private StoryboardItem findItemOrNull(Long id) {
+        Long itemId = positiveOrNull(id);
+        if (itemId == null) {
+            return null;
+        }
+        try {
+            return storyboardService.getItemById(itemId);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String appendWarning(String primary, String secondary) {
+        if (StrUtil.isBlank(secondary)) {
+            return primary;
+        }
+        return primary + "；" + secondary;
     }
 
     private String errorResult(String message) {
