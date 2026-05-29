@@ -1,13 +1,45 @@
 package com.stonewu.fusion.controller.system;
 
-import com.stonewu.fusion.common.CommonResult;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.stonewu.fusion.common.BusinessException;
+import com.stonewu.fusion.common.CommonResult;
+import static com.stonewu.fusion.common.CommonResult.success;
+import com.stonewu.fusion.controller.system.vo.ChangePasswordReqVO;
+import com.stonewu.fusion.controller.system.vo.LoginReqVO;
 import com.stonewu.fusion.controller.system.vo.LoginRespVO;
+import com.stonewu.fusion.controller.system.vo.PasswordResetRequestVO;
+import com.stonewu.fusion.controller.system.vo.PasswordResetSubmitVO;
+import com.stonewu.fusion.controller.system.vo.ProfileUpdateReqVO;
+import com.stonewu.fusion.controller.system.vo.RegisterReqVO;
 import com.stonewu.fusion.controller.system.vo.UserRespVO;
 import com.stonewu.fusion.entity.system.Role;
 import com.stonewu.fusion.entity.system.User;
 import com.stonewu.fusion.security.SecurityUserDetails;
 import com.stonewu.fusion.security.TokenService;
+import com.stonewu.fusion.service.system.MailService;
+import com.stonewu.fusion.service.system.SystemConfigService;
+import com.stonewu.fusion.service.system.UserService;
+import com.stonewu.fusion.service.team.TeamService;
+
+import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.SecureUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,33 +48,6 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.data.redis.core.StringRedisTemplate;
-
-import com.stonewu.fusion.controller.system.vo.LoginReqVO;
-import com.stonewu.fusion.controller.system.vo.RegisterReqVO;
-import com.stonewu.fusion.controller.system.vo.ProfileUpdateReqVO;
-import com.stonewu.fusion.controller.system.vo.ChangePasswordReqVO;
-import com.stonewu.fusion.controller.system.vo.PasswordResetRequestVO;
-import com.stonewu.fusion.controller.system.vo.PasswordResetSubmitVO;
-import com.stonewu.fusion.service.team.TeamService;
-import com.stonewu.fusion.service.system.UserService;
-import com.stonewu.fusion.service.system.MailService;
-import com.stonewu.fusion.service.system.SystemConfigService;
-
-import cn.hutool.core.util.IdUtil;
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.crypto.SecureUtil;
-
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-
-import static com.stonewu.fusion.common.CommonResult.success;
 
 /**
  * 认证控制器
@@ -219,7 +224,7 @@ public class AuthController {
             String emailContent = String.format(
                     "<div style='font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 8px;'>"
                             +
-                            "  <h2 style='color: #333;'>融光 · AI视频创作平台密码重置</h2>" +
+                            "  <h2 style='color: #333;'>星拓 · AI视频创作平台密码重置</h2>" +
                             "  <p>您好 %s，</p>" +
                             "  <p>我们收到了重置您账户密码的请求。请点击下面的链接来重置您的密码：</p>" +
                             "  <p style='margin: 30px 0;'><a href='%s' style='background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;'>重置密码</a></p>"
@@ -231,7 +236,7 @@ public class AuthController {
                             "</div>",
                     user.getNickname(), resetUrl, resetUrl);
 
-            mailService.sendHtmlEmail(user.getEmail(), "【融光】密码重置申请", emailContent);
+            mailService.sendHtmlEmail(user.getEmail(), "【星拓】密码重置申请", emailContent);
             return success("密码重置链接已发送至您的邮箱，请在 24 小时内点击重置");
         } else if ("log".equalsIgnoreCase(type)) {
             // 后台验证码只支持管理员账号使用

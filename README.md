@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/logo.png" alt="融光 Logo" width="368" />
+  <img src="assets/logo.png" alt="星拓 Logo" width="368" />
 </p>
 <p align="center">
-  <strong>融光，基于 Agent 的智能视频创作平台</strong>
+  <strong>星拓，基于 Agent 的智能视频创作平台</strong>
 </p>
 <p align="center">
   <img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="version" />
@@ -17,7 +17,7 @@
       <br />
       <sub>Lumina 是一个企业级 API 中转平台，深度聚合 GPT、Claude、Gemini、Sora、Seedance 等全球主流大模型 API，平台提供极具竞争力的价格和企业级稳定性</sub>
       <br />
-      <sub>💬 客服微信：<b>haha2027456</b> | QQ：<b>2736504134</b>（报暗号<b>【融光】</b>享 VIP 分组价格）</sub>
+      <sub>💬 客服微信：<b>haha2027456</b> | QQ：<b>2736504134</b>（报暗号<b>【星拓】</b>享 VIP 分组价格）</sub>
     </td>
   </tr>
 </table>
@@ -26,7 +26,7 @@
 
 ## 📖 项目简介
 
-融光是一款面向内容创作者的 AI 视频创作平台。你可以在平台上编写剧本，AI 会自动将剧本拆解为分镜画面，并利用多家主流 AI 模型生成配图和视频片段，让视频创作流程更高效、更智能。
+星拓是一款面向内容创作者的 AI 视频创作平台。你可以在平台上编写剧本，AI 会自动将剧本拆解为分镜画面，并利用多家主流 AI 模型生成配图和视频片段，让视频创作流程更高效、更智能。
 
 **技术栈**：后端基于 Java 21 + Spring Boot 3.5 + Spring AI 构建，前端使用 Next.js 16 + React 19 + TypeScript 开发。
 
