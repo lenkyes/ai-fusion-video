@@ -226,7 +226,7 @@ class GenerateVideoToolExecutorTests {
         ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
         verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
         assertThat(taskCaptor.getValue().getCategory())
-                .isEqualTo("storyboard_item:3308:request:request-20260529");
+                .isEqualTo("storyboard_item:3308:request:req_5bfc536a59099c4f");
         assertThat(result).contains("\"status\":\"success\"");
         assertThat(result).contains("regenerated.mp4");
     }
@@ -250,7 +250,7 @@ class GenerateVideoToolExecutorTests {
                 .id(96L)
                 .taskId("task-96")
                 .status(3)
-                .category("storyboard_item:3308:request:request-20260529")
+                .category("storyboard_item:3308:request:req_5bfc536a59099c4f")
                 .build();
 
         when(aiModelService.getDefaultByType(3)).thenReturn(model);
@@ -338,9 +338,59 @@ class GenerateVideoToolExecutorTests {
 
         ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
         verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
-        assertThat(taskCaptor.getValue().getCategory()).isEqualTo("storyboard_item:3308:request:new-request");
+        assertThat(taskCaptor.getValue().getCategory()).isEqualTo("storyboard_item:3308:request:req_b22853fd971ddbf4");
         assertThat(result).contains("\"status\":\"success\"");
         assertThat(result).contains("new-regenerated.mp4");
+    }
+
+    @Test
+    void shouldKeepRegenerationCategoryWithinDatabaseColumnLimit() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        VideoTask completedTask = VideoTask.builder().id(101L).taskId("task-101").status(2).build();
+
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completedTask);
+        when(videoGenerationService.listItems(101L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://example.test/max-category.mp4")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService,
+                storyboardService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "storyboardItemId": 9223372036854775807,
+                  "forceRegenerate": true,
+                  "generationRequestId": "storyboard-video-1770000000000-this-is-a-very-long-request-id"
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
+        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
+        assertThat(taskCaptor.getValue().getCategory())
+                .startsWith("storyboard_item:9223372036854775807:request:req_");
+        assertThat(taskCaptor.getValue().getCategory().length()).isLessThanOrEqualTo(64);
+        assertThat(result).contains("\"status\":\"success\"");
     }
 
     @Test

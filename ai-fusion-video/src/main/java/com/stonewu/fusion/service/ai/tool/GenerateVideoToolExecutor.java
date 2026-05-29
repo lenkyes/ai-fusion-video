@@ -2,6 +2,7 @@ package com.stonewu.fusion.service.ai.tool;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.ai.AiModel;
@@ -492,22 +493,18 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         if (StrUtil.isBlank(storyboardCategory)) {
             return null;
         }
-        String normalizedRequestId = sanitizeGenerationRequestId(generationRequestId);
-        if (forceRegenerate && StrUtil.isNotBlank(normalizedRequestId)) {
-            return storyboardCategory + ":request:" + normalizedRequestId;
+        String requestScope = generationRequestScope(generationRequestId);
+        if (forceRegenerate && StrUtil.isNotBlank(requestScope)) {
+            return storyboardCategory + ":request:" + requestScope;
         }
         return storyboardCategory;
     }
 
-    private String sanitizeGenerationRequestId(String requestId) {
+    private String generationRequestScope(String requestId) {
         if (StrUtil.isBlank(requestId)) {
             return null;
         }
-        String sanitized = requestId.trim().replaceAll("[^A-Za-z0-9_-]", "");
-        if (StrUtil.isBlank(sanitized)) {
-            return null;
-        }
-        return sanitized.length() > 80 ? sanitized.substring(0, 80) : sanitized;
+        return "req_" + DigestUtil.sha256Hex(requestId.trim()).substring(0, 16);
     }
 
     private boolean isRequestScopedCategory(String category) {
