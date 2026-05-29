@@ -295,6 +295,20 @@ export const storyboardApi = {
   updateItem: (data: StoryboardItemUpdateReq) =>
     http.put<never, StoryboardItem>("/api/storyboard/item", data),
 
+  /** 上传本地视频并关联到分镜镜头 */
+  uploadItemVideo: (itemId: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return http.post<never, StoryboardItem>(
+      `/api/storyboard/item/${itemId}/upload-video`,
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 10 * 60 * 1000,
+      }
+    );
+  },
+
   /** 删除分镜条目 */
   deleteItem: (id: number) =>
     http.delete<never, boolean>(`/api/storyboard/item/${id}`),

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { memo, useState, useMemo } from "react";
-import { Film, Plus, Clock, Camera, Image as ImageIcon, GripHorizontal, Video, Play } from "lucide-react";
+import React, { memo, useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { Film, Plus, Clock, Camera, Image as ImageIcon, GripHorizontal, Video, Play, Upload, Loader2 } from "lucide-react";
 import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
@@ -43,6 +43,8 @@ const CardItemUI = memo(
       isSelected: boolean;
       onSelect?: () => void;
       onVideoGen?: (itemId: number) => void;
+      onUploadVideo?: (itemId: number, file: File) => void | Promise<void>;
+      uploadingVideo?: boolean;
       onPreviewVideo?: (videoUrl: string) => void;
       attributes?: SortableBindings["attributes"];
       listeners?: SortableBindings["listeners"];
@@ -58,6 +60,8 @@ const CardItemUI = memo(
         isSelected,
         onSelect,
         onVideoGen,
+        onUploadVideo,
+        uploadingVideo = false,
         onPreviewVideo,
         attributes,
         listeners,
@@ -76,10 +80,25 @@ const CardItemUI = memo(
       const [mediaMode, setMediaMode] = useState<"image" | "video">(
         hasVideo ? "video" : "image"
       );
+      useEffect(() => {
+        if (hasVideo && !hasImage) {
+          setMediaMode("video");
+        }
+      }, [hasVideo, hasImage]);
 
       const rawVideoUrl = (item.generatedVideoUrl || item.videoUrl || "") as string;
       const videoSrc = resolveMediaUrl(item.generatedVideoUrl || item.videoUrl) || "";
       const imageSrc = (item.generatedImageUrl || item.imageUrl || item.referenceImageUrl) as string;
+      const videoUploadInputRef = useRef<HTMLInputElement>(null);
+      const handleVideoUploadChange = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file || !onUploadVideo) return;
+          void onUploadVideo(item.id, file);
+        },
+        [item.id, onUploadVideo]
+      );
 
       return (
         <div
@@ -101,6 +120,13 @@ const CardItemUI = memo(
               : ""
           )}
         >
+          <input
+            ref={videoUploadInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={handleVideoUploadChange}
+          />
           {/* 画面/视频区域 16:9 */}
           <div className="aspect-video relative bg-muted/40 overflow-hidden shrink-0 border-b border-border/50">
             {/* 视频模式 */}
@@ -207,6 +233,29 @@ const CardItemUI = memo(
             )}
 
             {/* 生成视频按钮 - 右下角悬浮（只在图片模式或没有切换 tab 时显示） */}
+            {!hasVideo && onUploadVideo && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect?.();
+                  videoUploadInputRef.current?.click();
+                }}
+                disabled={uploadingVideo}
+                className={cn(
+                  "absolute bottom-2 left-2 p-1.5 rounded-md bg-black/40 backdrop-blur-sm",
+                  "opacity-0 group-hover:opacity-100 transition-all z-20",
+                  "hover:bg-primary/60 text-white/90 disabled:cursor-wait disabled:opacity-80"
+                )}
+                title="上传视频"
+              >
+                {uploadingVideo ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+
             {onVideoGen && !hasBoth && (
               <button
                 onClick={(e) => {
@@ -281,6 +330,8 @@ function SortableCardItem({
   isSelected,
   onSelect,
   onVideoGen,
+  onUploadVideo,
+  uploadingVideo,
   onPreviewVideo,
 }: {
   item: StoryboardItem;
@@ -288,6 +339,8 @@ function SortableCardItem({
   isSelected: boolean;
   onSelect: () => void;
   onVideoGen?: (itemId: number) => void;
+  onUploadVideo?: (itemId: number, file: File) => void | Promise<void>;
+  uploadingVideo?: boolean;
   onPreviewVideo?: (videoUrl: string) => void;
 }) {
   const {
@@ -313,6 +366,8 @@ function SortableCardItem({
       isSelected={isSelected}
       onSelect={onSelect}
       onVideoGen={onVideoGen}
+      onUploadVideo={onUploadVideo}
+      uploadingVideo={uploadingVideo}
       onPreviewVideo={onPreviewVideo}
       attributes={attributes}
       listeners={listeners}
@@ -328,6 +383,8 @@ export function StoryboardCardView({
   onAddItem,
   onReorderItems,
   onVideoGen,
+  onUploadVideo,
+  uploadingVideoItemIds = [],
 }: {
   items: StoryboardItem[];
   selectedItemId: number | null;
@@ -335,6 +392,8 @@ export function StoryboardCardView({
   onAddItem: () => void;
   onReorderItems?: (reordered: StoryboardItem[]) => void;
   onVideoGen?: (itemId: number) => void;
+  onUploadVideo?: (itemId: number, file: File) => void | Promise<void>;
+  uploadingVideoItemIds?: number[];
 }) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
@@ -416,6 +475,8 @@ export function StoryboardCardView({
                 isSelected={selectedItemId === item.id}
                 onSelect={() => onSelectItem(item.id)}
                 onVideoGen={onVideoGen}
+                onUploadVideo={onUploadVideo}
+                uploadingVideo={uploadingVideoItemIds.includes(item.id)}
                 onPreviewVideo={setPreviewVideoUrl}
               />
             ))}

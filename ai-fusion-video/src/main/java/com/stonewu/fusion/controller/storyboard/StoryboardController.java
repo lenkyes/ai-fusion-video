@@ -1,5 +1,6 @@
 package com.stonewu.fusion.controller.storyboard;
 
+import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.common.CommonResult;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardCreateReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardEpisodeCreateReqVO;
@@ -22,8 +23,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import static com.stonewu.fusion.security.SecurityUtils.requireCurrentUserId;
 
@@ -35,6 +42,9 @@ import static com.stonewu.fusion.security.SecurityUtils.requireCurrentUserId;
 @RequestMapping("/api/storyboard")
 @RequiredArgsConstructor
 public class StoryboardController {
+
+    private static final long MAX_VIDEO_UPLOAD_SIZE = 1024L * 1024L * 1024L;
+    private static final Set<String> ALLOWED_VIDEO_EXTENSIONS = Set.of("mp4", "mov", "webm", "m4v", "avi", "mkv");
 
     private final StoryboardService storyboardService;
     private final VideoComposeService videoComposeService;
@@ -191,6 +201,37 @@ public class StoryboardController {
         return CommonResult.success(storyboardService.updateItem(item));
     }
 
+    @Operation(summary = "上传本地视频并关联到分镜镜头")
+    @PostMapping("/item/{id}/upload-video")
+    public CommonResult<StoryboardItem> uploadItemVideo(@PathVariable Long id,
+                                                        @RequestParam("file") MultipartFile file) {
+        validateVideoUpload(file);
+        String extension = resolveVideoExtension(file);
+        Long userId = requireCurrentUserId();
+        StoryboardItem current = storyboardService.getItemById(id);
+        if (isNotBlank(current.getVideoUrl()) || isNotBlank(current.getGeneratedVideoUrl())) {
+            throw new BusinessException("该镜头已有视频，不能通过空视频位重复上传");
+        }
+
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("storyboard_video_upload_", "." + extension);
+            file.transferTo(tempFile);
+            String videoUrl = storyboardService.storeUploadedVideo(tempFile, extension);
+            StoryboardItem updated = storyboardService.attachUploadedVideo(id, videoUrl, userId, file.getSize());
+            return CommonResult.success(updated);
+        } catch (IOException e) {
+            throw new BusinessException("上传视频失败: " + e.getMessage());
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+    }
+
     @Operation(summary = "删除分镜条目")
     @DeleteMapping("/item/{id}")
     public CommonResult<Boolean> deleteItem(@PathVariable Long id) {
@@ -213,5 +254,49 @@ public class StoryboardController {
     public CommonResult<Boolean> batchUpdateSort(@Valid @RequestBody StoryboardItemSortReqVO reqVO) {
         storyboardService.batchUpdateItemSort(reqVO.getIds());
         return CommonResult.success(true);
+    }
+
+    private void validateVideoUpload(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("视频文件不能为空");
+        }
+        if (file.getSize() > MAX_VIDEO_UPLOAD_SIZE) {
+            throw new BusinessException("视频文件大小不能超过 1GB");
+        }
+        String extension = resolveVideoExtension(file);
+        String contentType = file.getContentType();
+        boolean allowedContentType = contentType != null
+                && contentType.toLowerCase(Locale.ROOT).startsWith("video/");
+        if (!allowedContentType && !ALLOWED_VIDEO_EXTENSIONS.contains(extension)) {
+            throw new BusinessException("仅支持视频文件格式：MP4, MOV, WebM, M4V, AVI, MKV");
+        }
+    }
+
+    private String resolveVideoExtension(MultipartFile file) {
+        String filename = file != null ? file.getOriginalFilename() : null;
+        if (filename != null) {
+            int dotIndex = filename.lastIndexOf('.');
+            if (dotIndex >= 0 && dotIndex < filename.length() - 1) {
+                String extension = filename.substring(dotIndex + 1)
+                        .toLowerCase(Locale.ROOT)
+                        .replaceAll("[^a-z0-9]", "");
+                if (!extension.isBlank()) {
+                    return extension;
+                }
+            }
+        }
+
+        String contentType = file != null ? file.getContentType() : null;
+        if (contentType != null) {
+            String lower = contentType.toLowerCase(Locale.ROOT);
+            if (lower.contains("webm")) return "webm";
+            if (lower.contains("quicktime") || lower.contains("mov")) return "mov";
+            if (lower.contains("m4v")) return "m4v";
+        }
+        return "mp4";
+    }
+
+    private boolean isNotBlank(String value) {
+        return value != null && !value.isBlank();
     }
 }

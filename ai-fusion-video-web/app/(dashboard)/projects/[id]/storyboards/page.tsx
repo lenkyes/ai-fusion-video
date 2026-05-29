@@ -172,6 +172,7 @@ export default function StoryboardTabPage() {
   const [composedPreviewUrl, setComposedPreviewUrl] = useState<string | null>(null);
   const [runningComposeEpisodeIds, setRunningComposeEpisodeIds] = useState<number[]>([]);
   const [submittingComposeEpisodeIds, setSubmittingComposeEpisodeIds] = useState<number[]>([]);
+  const [uploadingVideoItemIds, setUploadingVideoItemIds] = useState<number[]>([]);
 
   // 滚动定位 refs
   const sceneRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -605,6 +606,31 @@ export default function StoryboardTabPage() {
   };
 
   // 拖拽排序
+  const handleUploadItemVideo = useCallback(async (itemId: number, file: File) => {
+    if (file.type && !file.type.startsWith("video/")) {
+      alert("请选择视频文件");
+      return;
+    }
+    setUploadingVideoItemIds((prev) =>
+      prev.includes(itemId) ? prev : [...prev, itemId]
+    );
+    try {
+      const updated = await storyboardApi.uploadItemVideo(itemId, file);
+      setSceneGroups((prev) =>
+        prev.map((group) => ({
+          ...group,
+          items: group.items.map((item) => (item.id === updated.id ? updated : item)),
+        }))
+      );
+      setSelectedItemId(updated.id);
+    } catch (err) {
+      console.error("上传镜头视频失败:", err);
+      alert(err instanceof Error ? err.message : "上传镜头视频失败，请重试");
+    } finally {
+      setUploadingVideoItemIds((prev) => prev.filter((id) => id !== itemId));
+    }
+  }, []);
+
   const handleReorderItems = async (
     sceneId: number,
     reorderedItems: import("@/lib/api/storyboard").StoryboardItem[]
@@ -1087,6 +1113,8 @@ export default function StoryboardTabPage() {
                       handleReorderItems(scene.id, reordered)
                     }
                     onVideoGen={handleVideoGen}
+                    onUploadVideo={handleUploadItemVideo}
+                    uploadingVideoItemIds={uploadingVideoItemIds}
                     assetLookup={assetLookup}
                     onEditAssets={(item) => {
                       setEditingItem(item);
@@ -1105,6 +1133,8 @@ export default function StoryboardTabPage() {
                       handleReorderItems(scene.id, reordered)
                     }
                     onVideoGen={handleVideoGen}
+                    onUploadVideo={handleUploadItemVideo}
+                    uploadingVideoItemIds={uploadingVideoItemIds}
                   />
                 )}
               </div>

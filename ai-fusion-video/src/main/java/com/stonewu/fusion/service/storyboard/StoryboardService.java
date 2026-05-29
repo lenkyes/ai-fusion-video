@@ -1,7 +1,11 @@
 package com.stonewu.fusion.service.storyboard;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.stonewu.fusion.common.BusinessException;
+import com.stonewu.fusion.entity.generation.VideoItem;
+import com.stonewu.fusion.entity.generation.VideoTask;
 import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
@@ -11,6 +15,8 @@ import com.stonewu.fusion.mapper.storyboard.StoryboardItemMapper;
 import com.stonewu.fusion.mapper.storyboard.StoryboardMapper;
 import com.stonewu.fusion.mapper.storyboard.StoryboardSceneMapper;
 import com.stonewu.fusion.security.SecurityUtils;
+import com.stonewu.fusion.service.generation.VideoGenerationService;
+import com.stonewu.fusion.service.storage.MediaStorageService;
 import com.stonewu.fusion.service.team.TeamService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
@@ -18,6 +24,8 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -32,6 +40,8 @@ public class StoryboardService {
     private final StoryboardSceneMapper sceneMapper;
     private final StoryboardItemMapper itemMapper;
     private final TeamService teamService;
+    private final VideoGenerationService videoGenerationService;
+    private final MediaStorageService mediaStorageService;
 
     // ========== 分镜脚本 ==========
 
@@ -197,6 +207,79 @@ public class StoryboardService {
         getItemById(item.getId());
         itemMapper.updateById(item);
         return itemMapper.selectById(item.getId());
+    }
+
+    @CacheEvict(value = {"storyboardItem", "videoTask", "videoItems"}, allEntries = true)
+    @Transactional
+    public StoryboardItem attachUploadedVideo(Long itemId, String videoUrl, Long userId, Long fileSize) {
+        if (itemId == null) {
+            throw new BusinessException("分镜镜头ID不能为空");
+        }
+        if (StrUtil.isBlank(videoUrl)) {
+            throw new BusinessException("上传视频URL不能为空");
+        }
+
+        StoryboardItem item = getItemById(itemId);
+        if (StrUtil.isNotBlank(item.getVideoUrl()) || StrUtil.isNotBlank(item.getGeneratedVideoUrl())) {
+            throw new BusinessException("该镜头已有视频，不能通过空视频位重复上传");
+        }
+
+        Storyboard storyboard = getById(item.getStoryboardId());
+        Integer duration = secondsToInteger(item.getDuration());
+        String prompt = firstNonBlank(item.getVideoPrompt(), item.getContent(), "Manual uploaded storyboard video");
+
+        VideoTask task = VideoTask.builder()
+                .taskId("manual_" + IdUtil.fastSimpleUUID())
+                .userId(userId)
+                .projectId(storyboard.getProjectId())
+                .prompt(prompt)
+                .generateMode("manual_upload")
+                .duration(duration)
+                .count(1)
+                .successCount(1)
+                .status(2)
+                .category("storyboard_item:" + itemId + ":manual")
+                .build();
+        videoGenerationService.create(task);
+
+        VideoItem videoItem = VideoItem.builder()
+                .taskId(task.getId())
+                .videoUrl(videoUrl)
+                .duration(duration)
+                .fileSize(fileSize)
+                .status(1)
+                .build();
+        videoGenerationService.createItem(videoItem);
+
+        item.setVideoUrl(videoUrl);
+        itemMapper.updateById(item);
+        return itemMapper.selectById(itemId);
+    }
+
+    public String storeUploadedVideo(Path filePath, String extension) {
+        if (filePath == null) {
+            throw new BusinessException("上传视频文件不能为空");
+        }
+        return mediaStorageService.storeFile(filePath, "videos", StrUtil.blankToDefault(extension, "mp4"));
+    }
+
+    private Integer secondsToInteger(BigDecimal duration) {
+        if (duration == null) {
+            return null;
+        }
+        return duration.setScale(0, java.math.RoundingMode.HALF_UP).intValue();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     @CacheEvict(value = "storyboardItem", allEntries = true)

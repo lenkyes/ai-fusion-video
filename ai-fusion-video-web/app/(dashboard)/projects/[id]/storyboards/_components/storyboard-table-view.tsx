@@ -1,6 +1,6 @@
 "use client";
 
-import { Film, GripVertical, Plus, Trash2, ImageIcon, Video, Play, ZoomIn, X, User, MapPin, Package } from "lucide-react";
+import { Film, GripVertical, Plus, Trash2, Video, Play, ZoomIn, X, Upload, Loader2 } from "lucide-react";
 import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
@@ -127,6 +127,8 @@ export function StoryboardTableView({
   onDeleteItem,
   onReorderItems,
   onVideoGen,
+  onUploadVideo,
+  uploadingVideoItemIds = [],
   assetLookup = {},
   onEditAssets,
 }: {
@@ -138,6 +140,8 @@ export function StoryboardTableView({
   onDeleteItem: (id: number) => void;
   onReorderItems?: (reorderedItems: StoryboardItem[]) => void;
   onVideoGen?: (itemId: number) => void;
+  onUploadVideo?: (itemId: number, file: File) => void | Promise<void>;
+  uploadingVideoItemIds?: number[];
   assetLookup?: Record<
     number,
     {
@@ -151,6 +155,25 @@ export function StoryboardTableView({
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string>("");
+  const videoUploadInputRef = useRef<HTMLInputElement>(null);
+  const videoUploadTargetItemIdRef = useRef<number | null>(null);
+
+  const triggerVideoUpload = useCallback((itemId: number) => {
+    videoUploadTargetItemIdRef.current = itemId;
+    videoUploadInputRef.current?.click();
+  }, []);
+
+  const handleVideoUploadInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      const itemId = videoUploadTargetItemIdRef.current;
+      event.target.value = "";
+      videoUploadTargetItemIdRef.current = null;
+      if (!file || !itemId || !onUploadVideo) return;
+      void onUploadVideo(itemId, file);
+    },
+    [onUploadVideo]
+  );
 
   // ========== 行拖拽排序 ==========
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -295,6 +318,13 @@ export function StoryboardTableView({
 
   return (
     <div className="space-y-3">
+      <input
+        ref={videoUploadInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={handleVideoUploadInputChange}
+      />
       {/* 横向滚动容器 */}
       <div className="rounded-xl border border-border/20 bg-card/30 backdrop-blur-sm overflow-x-auto">
         <div ref={containerRef} style={{ width: totalWidth, minWidth: totalWidth }}>
@@ -444,6 +474,32 @@ export function StoryboardTableView({
                               </TooltipContent>
                             </Tooltip>
                           </>
+                        ) : onUploadVideo ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  disabled={uploadingVideoItemIds.includes(item.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectItem(item.id);
+                                    triggerVideoUpload(item.id);
+                                  }}
+                                  className="absolute inset-0 flex items-center justify-center text-muted-foreground/45 hover:text-primary hover:bg-primary/5 transition-colors disabled:cursor-wait disabled:opacity-70"
+                                >
+                                  {uploadingVideoItemIds.includes(item.id) ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              }
+                            />
+                            <TooltipContent className={TOOLTIP_CONTENT_CLASS}>
+                              上传视频
+                            </TooltipContent>
+                          </Tooltip>
                         ) : (
                           <Video className="h-3.5 w-3.5 text-muted-foreground/30" />
                         )}
