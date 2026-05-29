@@ -9,6 +9,7 @@ import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
+import com.stonewu.fusion.service.system.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -33,6 +34,7 @@ class GenerateVideoToolExecutorTests {
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
         GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
         VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
 
         AiModel model = AiModel.builder()
                 .id(31L)
@@ -55,7 +57,8 @@ class GenerateVideoToolExecutorTests {
                 videoGenerationService,
                 videoGenerationConsumer,
                 capabilityService,
-                strategyRouter);
+                strategyRouter,
+                systemConfigService);
         ReflectionTestUtils.setField(executor, "waitTimeoutMs", 12345L);
 
         String result = executor.execute("{\"prompt\":\"镜头缓慢推进\",\"duration\":5,\"storyboardItemId\":3307}",
@@ -76,6 +79,7 @@ class GenerateVideoToolExecutorTests {
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
         GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
         VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
 
         AiModel unsupportedDefault = AiModel.builder()
                 .id(41L)
@@ -104,7 +108,8 @@ class GenerateVideoToolExecutorTests {
                 videoGenerationService,
                 videoGenerationConsumer,
                 capabilityService,
-                strategyRouter);
+                strategyRouter,
+                systemConfigService);
 
         String result = executor.execute("{\"prompt\":\"镜头缓慢推进\"}",
                 ToolExecutionContext.builder().userId(7L).build());
@@ -122,6 +127,7 @@ class GenerateVideoToolExecutorTests {
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
         GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
         VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
 
         AiModel model = AiModel.builder()
                 .id(31L)
@@ -147,7 +153,8 @@ class GenerateVideoToolExecutorTests {
                 videoGenerationService,
                 videoGenerationConsumer,
                 capabilityService,
-                strategyRouter);
+                strategyRouter,
+                systemConfigService);
 
         String result = executor.execute("{\"prompt\":\"镜头缓慢推进\",\"storyboardItemId\":3308}",
                 ToolExecutionContext.builder().userId(7L).build());
@@ -166,6 +173,7 @@ class GenerateVideoToolExecutorTests {
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
         GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
         VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
 
         AiModel model = AiModel.builder()
                 .id(31L)
@@ -190,7 +198,8 @@ class GenerateVideoToolExecutorTests {
                 videoGenerationService,
                 videoGenerationConsumer,
                 capabilityService,
-                strategyRouter);
+                strategyRouter,
+                systemConfigService);
 
         String result = executor.execute("{\"prompt\":\"镜头缓慢推进\",\"storyboardItemId\":3308}",
                 ToolExecutionContext.builder().userId(7L).build());
@@ -201,5 +210,66 @@ class GenerateVideoToolExecutorTests {
         assertThat(result).contains("\"remoteTaskSubmitted\":true");
         assertThat(result).contains("local-task-89");
         assertThat(result).contains("remote-task-2");
+    }
+
+    @Test
+    void shouldResolveRelativeAssetUrlsAndSkipPresetArtStyleReferenceForVideo() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(systemConfigService.resolvePublicUrl("/media/images/first.png"))
+                .thenReturn("https://fusion.example.com/media/images/first.png");
+        when(systemConfigService.resolvePublicUrl("/media/images/actor.png"))
+                .thenReturn("https://fusion.example.com/media/images/actor.png");
+        when(systemConfigService.resolvePublicUrl("https://oss.example.com/ref.png"))
+                .thenReturn("https://oss.example.com/ref.png");
+
+        VideoTask completedTask = VideoTask.builder().id(93L).taskId("task-93").status(2).build();
+        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completedTask);
+        when(videoGenerationService.listItems(93L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://example.test/video.mp4")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "firstFrameImageUrl": "/media/images/first.png",
+                  "referenceImageUrls": [
+                    "/api/art-styles/realistic.jpg",
+                    "/media/images/actor.png",
+                    "https://oss.example.com/ref.png"
+                  ],
+                  "storyboardItemId": 3309
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
+        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
+        VideoTask task = taskCaptor.getValue();
+
+        assertThat(task.getFirstFrameImageUrl()).isEqualTo("https://fusion.example.com/media/images/first.png");
+        assertThat(task.getReferenceImageUrls()).contains("https://fusion.example.com/media/images/actor.png");
+        assertThat(task.getReferenceImageUrls()).contains("https://oss.example.com/ref.png");
+        assertThat(task.getReferenceImageUrls()).doesNotContain("realistic.jpg");
+        assertThat(result).contains("\"status\":\"success\"");
     }
 }

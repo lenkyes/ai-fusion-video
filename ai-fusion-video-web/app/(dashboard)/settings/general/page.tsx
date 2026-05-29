@@ -30,6 +30,7 @@ import { containerVariants, itemVariants } from "../_shared";
 
 interface SystemConfigs {
   site_base_url: string;
+  asset_public_base_url: string;
   allow_register: boolean;
   mail_smtp_host?: string;
   mail_smtp_port?: string;
@@ -59,6 +60,7 @@ export default function GeneralSettingsPage() {
   const isAdmin = currentUser?.roles?.includes("admin") ?? false;
   const [configs, setConfigs] = useState<SystemConfigs>({
     site_base_url: "",
+    asset_public_base_url: "",
     allow_register: false,
     mail_smtp_host: "",
     mail_smtp_port: "",
@@ -69,6 +71,7 @@ export default function GeneralSettingsPage() {
   });
   const [original, setOriginal] = useState<SystemConfigs>({
     site_base_url: "",
+    asset_public_base_url: "",
     allow_register: false,
     mail_smtp_host: "",
     mail_smtp_port: "",
@@ -130,6 +133,7 @@ export default function GeneralSettingsPage() {
         });
         const loaded = {
           site_base_url: map.site_base_url || "",
+          asset_public_base_url: map.asset_public_base_url || "",
           allow_register: map.allow_register === "true",
           mail_smtp_host: map.mail_smtp_host || "",
           mail_smtp_port: map.mail_smtp_port || "",
@@ -189,6 +193,7 @@ export default function GeneralSettingsPage() {
 
   const hasChanges =
     configs.site_base_url !== original.site_base_url ||
+    configs.asset_public_base_url !== original.asset_public_base_url ||
     configs.allow_register !== original.allow_register ||
     configs.mail_smtp_host !== original.mail_smtp_host ||
     configs.mail_smtp_port !== original.mail_smtp_port ||
@@ -202,6 +207,7 @@ export default function GeneralSettingsPage() {
     try {
       await http.put("/api/system/config", {
         site_base_url: configs.site_base_url,
+        asset_public_base_url: configs.asset_public_base_url,
         allow_register: String(configs.allow_register),
         mail_smtp_host: configs.mail_smtp_host || "",
         mail_smtp_port: configs.mail_smtp_port || "",
@@ -368,6 +374,29 @@ export default function GeneralSettingsPage() {
               "placeholder:text-muted-foreground/40"
             )}
           />
+
+          <div className="mt-5">
+            <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
+              资源公网域名
+            </label>
+            <input
+              type="url"
+              value={configs.asset_public_base_url}
+              onChange={(e) =>
+                setConfigs((prev) => ({ ...prev, asset_public_base_url: e.target.value }))
+              }
+              placeholder="https://fusion.example.com"
+              className={cn(
+                "w-full px-4 py-2.5 rounded-xl text-sm",
+                "bg-muted/30 border border-border/30",
+                "focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20",
+                "placeholder:text-muted-foreground/40"
+              )}
+            />
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              当后端 API 域名和前端访问域名不一致时，填写图片和视频可公网访问的域名。生视频会用它拼接 /media/** 资源，避免上游模型去 api 域名读取图片。
+            </p>
+          </div>
 
           <div className="mt-4 space-y-3">
             <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/10 border border-border/20">

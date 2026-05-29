@@ -14,6 +14,7 @@ import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
+import com.stonewu.fusion.service.system.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +48,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private final VideoGenerationConsumer videoGenerationConsumer;
     private final GenerationModelCapabilityService generationModelCapabilityService;
     private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
+    private final SystemConfigService systemConfigService;
 
     @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
     private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
@@ -166,32 +168,22 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 return errorResult("缺少 prompt");
             }
 
-            String firstFrameImageUrl = params.getStr("firstFrameImageUrl");
-            String lastFrameImageUrl = params.getStr("lastFrameImageUrl");
+            String firstFrameImageUrl = resolvePublicMediaUrl(params.getStr("firstFrameImageUrl"), "firstFrameImageUrl");
+            String lastFrameImageUrl = resolvePublicMediaUrl(params.getStr("lastFrameImageUrl"), "lastFrameImageUrl");
             String ratio = params.getStr("ratio", "16:9");
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
             Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
 
-            // 解析多模态参考图片列表
-            List<String> referenceImageUrlList = new ArrayList<>();
-            cn.hutool.json.JSONArray refImagesArr = params.getJSONArray("referenceImageUrls");
-            if (refImagesArr != null) {
-                for (int i = 0; i < refImagesArr.size(); i++) {
-                    String url = refImagesArr.getStr(i);
-                    if (StrUtil.isNotBlank(url)) {
-                        referenceImageUrlList.add(url);
-                    }
-                }
-            }
-            String referenceImageUrls = CollUtil.isEmpty(referenceImageUrlList)
-                    ? null : JSONUtil.toJsonStr(referenceImageUrlList);
+            // 解析多模态参考图片列表。预设画风图只参与文字风格，不作为视频主体参考图传给上游。
+            List<String> referenceImageUrlList = collectMediaUrls(params, "referenceImageUrls", true);
+            String referenceImageUrls = toJsonOrNull(referenceImageUrlList);
 
             // 解析参考视频列表
-            String referenceVideoUrls = parseUrlArray(params, "referenceVideoUrls");
+            String referenceVideoUrls = toJsonOrNull(collectMediaUrls(params, "referenceVideoUrls", false));
 
             // 解析参考音频列表
-            String referenceAudioUrls = parseUrlArray(params, "referenceAudioUrls");
+            String referenceAudioUrls = toJsonOrNull(collectMediaUrls(params, "referenceAudioUrls", false));
 
             // 确定生成模式
             String generateMode = StrUtil.isNotBlank(firstFrameImageUrl) ? "image2video" : "text2video";
@@ -423,21 +415,73 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
     }
 
-    /**
-     * 从参数中解析 URL 数组字段，返回 JSON 字符串或 null
-     */
-    private String parseUrlArray(JSONObject params, String fieldName) {
+    private List<String> collectMediaUrls(JSONObject params, String fieldName, boolean skipPresetArtStyles) {
         cn.hutool.json.JSONArray arr = params.getJSONArray(fieldName);
         if (arr == null || arr.isEmpty()) {
-            return null;
+            return List.of();
         }
         List<String> urls = new ArrayList<>();
         for (int i = 0; i < arr.size(); i++) {
-            String url = arr.getStr(i);
-            if (StrUtil.isNotBlank(url)) {
-                urls.add(url);
+            String rawUrl = arr.getStr(i);
+            if (StrUtil.isBlank(rawUrl)) {
+                continue;
+            }
+            if (skipPresetArtStyles && isPresetArtStyleUrl(rawUrl)) {
+                log.info("[generate_video] 已忽略预设画风参考图，避免视频模型误当主体参考: {}", rawUrl);
+                continue;
+            }
+            String publicUrl = resolvePublicMediaUrl(rawUrl, fieldName);
+            if (StrUtil.isNotBlank(publicUrl) && !urls.contains(publicUrl)) {
+                urls.add(publicUrl);
             }
         }
+        return urls;
+    }
+
+    private String toJsonOrNull(List<String> urls) {
         return CollUtil.isEmpty(urls) ? null : JSONUtil.toJsonStr(urls);
+    }
+
+    private String resolvePublicMediaUrl(String url, String fieldName) {
+        String rawUrl = StrUtil.trim(url);
+        if (StrUtil.isBlank(rawUrl)) {
+            return null;
+        }
+        String publicUrl = systemConfigService.resolvePublicUrl(rawUrl);
+        if (StrUtil.isBlank(publicUrl)) {
+            throw new IllegalArgumentException(fieldName + " 包含相对资源路径 " + rawUrl
+                    + "，但系统未配置资源公网域名 asset_public_base_url 或项目访问域名 site_base_url");
+        }
+        if (!isHttpUrl(publicUrl)) {
+            throw new IllegalArgumentException(fieldName + " 必须是上游视频服务可访问的完整 http/https URL，当前为: " + publicUrl);
+        }
+        return publicUrl;
+    }
+
+    private boolean isHttpUrl(String url) {
+        return StrUtil.startWithIgnoreCase(url, "http://")
+                || StrUtil.startWithIgnoreCase(url, "https://");
+    }
+
+    private boolean isPresetArtStyleUrl(String url) {
+        String value = StrUtil.trim(url);
+        if (StrUtil.isBlank(value)) {
+            return false;
+        }
+        String lower = value.toLowerCase();
+        int queryIndex = lower.indexOf('?');
+        if (queryIndex >= 0) {
+            lower = lower.substring(0, queryIndex);
+        }
+        int fragmentIndex = lower.indexOf('#');
+        if (fragmentIndex >= 0) {
+            lower = lower.substring(0, fragmentIndex);
+        }
+        if (isHttpUrl(lower)) {
+            int schemeIndex = lower.indexOf("://");
+            int pathStart = schemeIndex >= 0 ? lower.indexOf('/', schemeIndex + 3) : -1;
+            lower = pathStart >= 0 ? lower.substring(pathStart) : "/";
+        }
+        return lower.startsWith("/api/art-styles/") || lower.startsWith("/art-styles/");
     }
 }

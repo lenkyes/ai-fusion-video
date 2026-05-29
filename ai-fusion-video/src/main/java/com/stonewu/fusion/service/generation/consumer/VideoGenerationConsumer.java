@@ -2,9 +2,10 @@ package com.stonewu.fusion.service.generation.consumer;
 
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONArray;
+import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.entity.ai.AiModel;
-import com.stonewu.fusion.entity.ai.ApiConfig;
 import com.stonewu.fusion.entity.generation.VideoItem;
 import com.stonewu.fusion.entity.generation.VideoTask;
 import com.stonewu.fusion.infrastructure.queue.RedisTaskQueue;
@@ -14,6 +15,7 @@ import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategy;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
 import com.stonewu.fusion.service.storage.MediaStorageService;
+import com.stonewu.fusion.service.system.SystemConfigService;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +47,7 @@ public class VideoGenerationConsumer {
     private final GenerationModelCapabilityService generationModelCapabilityService;
     private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
     private final MediaStorageService mediaStorageService;
+    private final SystemConfigService systemConfigService;
 
     private final AtomicInteger workerThreadCounter = new AtomicInteger(1);
     private final ExecutorService workerExecutor = Executors.newCachedThreadPool(r -> {
@@ -63,6 +66,7 @@ public class VideoGenerationConsumer {
         }
         task.setModelId(queueModel.getId());
         applyTaskDefaults(task, queueModel);
+        normalizeTaskMediaUrls(task);
 
         String queueName = resolveQueueName(task.getModelId());
         String taskId = IdUtil.fastSimpleUUID();
@@ -92,6 +96,103 @@ public class VideoGenerationConsumer {
         if (task.getGenerateAudio() == null) {
             task.setGenerateAudio(true);
         }
+    }
+
+    private void normalizeTaskMediaUrls(VideoTask task) {
+        task.setFirstFrameImageUrl(resolvePublicMediaUrl(task.getFirstFrameImageUrl(), "firstFrameImageUrl"));
+        task.setLastFrameImageUrl(resolvePublicMediaUrl(task.getLastFrameImageUrl(), "lastFrameImageUrl"));
+        task.setReferenceImageUrls(toJsonOrNull(collectPublicMediaUrls(task.getReferenceImageUrls(), true, "referenceImageUrls")));
+        task.setReferenceVideoUrls(toJsonOrNull(collectPublicMediaUrls(task.getReferenceVideoUrls(), false, "referenceVideoUrls")));
+        task.setReferenceAudioUrls(toJsonOrNull(collectPublicMediaUrls(task.getReferenceAudioUrls(), false, "referenceAudioUrls")));
+    }
+
+    private List<String> collectPublicMediaUrls(String rawUrls, boolean skipPresetArtStyles, String fieldName) {
+        List<String> rawList = parseMediaUrlList(rawUrls, fieldName);
+        if (rawList.isEmpty()) {
+            return List.of();
+        }
+        List<String> urls = new ArrayList<>();
+        for (String rawUrl : rawList) {
+            if (skipPresetArtStyles && isPresetArtStyleUrl(rawUrl)) {
+                log.info("[VideoConsumer] Skip preset art-style reference image: {}", rawUrl);
+                continue;
+            }
+            String publicUrl = resolvePublicMediaUrl(rawUrl, fieldName);
+            if (StrUtil.isNotBlank(publicUrl) && !urls.contains(publicUrl)) {
+                urls.add(publicUrl);
+            }
+        }
+        return urls;
+    }
+
+    private List<String> parseMediaUrlList(String rawUrls, String fieldName) {
+        String trimmed = StrUtil.trim(rawUrls);
+        if (StrUtil.isBlank(trimmed)) {
+            return List.of();
+        }
+        if (!trimmed.startsWith("[")) {
+            return List.of(trimmed);
+        }
+        try {
+            JSONArray array = JSONUtil.parseArray(trimmed);
+            List<String> urls = new ArrayList<>();
+            for (Object item : array) {
+                String url = item == null ? null : StrUtil.trim(item.toString());
+                if (StrUtil.isNotBlank(url)) {
+                    urls.add(url);
+                }
+            }
+            return urls;
+        } catch (Exception e) {
+            throw new BusinessException("Failed to parse " + fieldName + ": " + e.getMessage());
+        }
+    }
+
+    private String toJsonOrNull(List<String> urls) {
+        return urls == null || urls.isEmpty() ? null : JSONUtil.toJsonStr(urls);
+    }
+
+    private String resolvePublicMediaUrl(String url, String fieldName) {
+        String rawUrl = StrUtil.trim(url);
+        if (StrUtil.isBlank(rawUrl)) {
+            return null;
+        }
+        String publicUrl = systemConfigService.resolvePublicUrl(rawUrl);
+        if (StrUtil.isBlank(publicUrl)) {
+            throw new BusinessException(fieldName + " contains relative media URL " + rawUrl
+                    + ", but asset_public_base_url or site_base_url is not configured");
+        }
+        if (!isHttpUrl(publicUrl)) {
+            throw new BusinessException(fieldName + " must be a public http/https URL, current value: " + publicUrl);
+        }
+        return publicUrl;
+    }
+
+    private boolean isHttpUrl(String url) {
+        return StrUtil.startWithIgnoreCase(url, "http://")
+                || StrUtil.startWithIgnoreCase(url, "https://");
+    }
+
+    private boolean isPresetArtStyleUrl(String url) {
+        String value = StrUtil.trim(url);
+        if (StrUtil.isBlank(value)) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        int queryIndex = lower.indexOf('?');
+        if (queryIndex >= 0) {
+            lower = lower.substring(0, queryIndex);
+        }
+        int fragmentIndex = lower.indexOf('#');
+        if (fragmentIndex >= 0) {
+            lower = lower.substring(0, fragmentIndex);
+        }
+        if (isHttpUrl(lower)) {
+            int schemeIndex = lower.indexOf("://");
+            int pathStart = schemeIndex >= 0 ? lower.indexOf('/', schemeIndex + 3) : -1;
+            lower = pathStart >= 0 ? lower.substring(pathStart) : "/";
+        }
+        return lower.startsWith("/api/art-styles/") || lower.startsWith("/art-styles/");
     }
 
     /**

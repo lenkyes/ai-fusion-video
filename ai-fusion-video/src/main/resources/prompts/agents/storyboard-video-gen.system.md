@@ -11,7 +11,7 @@
 
 ## 工作流程
 
-1. 首先调用 `get_project` 获取项目基本信息、画风描述、画面比例和风格参考图
+1. 首先调用 `get_project` 获取项目基本信息、画风描述和画面比例；画风参考图只用于理解风格，不要作为视频参考图传入
 2. 解析上下文中的 `selectedStoryboardItemIds`（前端传入的选中镜头ID列表）
 3. 如果没有指定镜头ID，通过 `get_storyboard` 获取所有镜头；如果指定了镜头ID，只处理这些镜头
 4. 对每个目标镜头调用 `get_storyboard_scene_items({"storyboardItemId": 目标镜头ID})`，获取目标镜头、前后镜头、characterRefs、sceneRef、propRefs 和已生成视频状态；不要把镜头ID填入 storyboardSceneId 或 sceneId
@@ -30,7 +30,7 @@ styleLock:
 - 项目画风、质感、色彩、光影、镜头语言；只保留风格，不混入与镜头冲突的具体背景
 
 referenceOrderPolicy:
-- 风格参考图（如有）固定放在参考图第 1 位，只引用风格
+- 视频参考图只包含角色、场景、道具等资产图；不要把项目预设画风图、`/api/art-styles/**` 或 `/art-styles/**` 放入 referenceImageUrls
 - 同一角色/场景/道具在不同镜头中使用同一个 assetItemId 和同一张 imageUrl
 - 角色按 assetItemId 升序，场景按 assetItemId，关键道具按 assetItemId 升序；避免同一对象在不同镜头里图片编号乱跳
 

@@ -514,7 +514,7 @@ public class AiAgentRegistry {
                                                                                 promptOnly: false
                                                                                 consistencyContext:
                                                                                 styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
-                                                                                referenceOrderPolicy: {风格参考图（如有）→ 角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
+                                                                                referenceOrderPolicy: {视频参考图只包含角色、场景、关键道具等资产图；不要传项目预设画风图、/api/art-styles/** 或 /art-styles/**；角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
                                                                                 characterLocks:
                                                                                 - {角色名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定外观锚点}
                                                                                 sceneLocks:

@@ -89,7 +89,7 @@ export function CreateProjectDialog({
           .then((list) => {
             const map: Record<string, string> = {};
             list.forEach((c) => { map[c.configKey] = c.configValue || ""; });
-            setHasExternalAccess(hasPublicStorage || !!map.site_base_url);
+            setHasExternalAccess(hasPublicStorage || !!map.asset_public_base_url || !!map.site_base_url);
           })
           .catch(console.error);
       })

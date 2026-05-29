@@ -10,6 +10,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.util.List;
 
 /**
@@ -69,12 +70,23 @@ public class SystemConfigService {
      * 获取站点访问域名
      */
     public String getSiteBaseUrl() {
-        String url = getValue("site_base_url");
-        // 去掉末尾斜杠
-        if (StrUtil.isNotBlank(url) && url.endsWith("/")) {
-            return url.substring(0, url.length() - 1);
+        return normalizeBaseUrl(getValue("site_base_url"));
+    }
+
+    /**
+     * 获取对外可访问的资源域名。
+     * <p>
+     * 前后端分域部署时，API 域名未必能访问 /media/** 静态资源，因此优先使用 asset_public_base_url。
+     */
+    public String getAssetPublicBaseUrl() {
+        String url = getValue("asset_public_base_url");
+        if (StrUtil.isBlank(url)) {
+            url = getValue("media_public_base_url");
         }
-        return url;
+        if (StrUtil.isBlank(url)) {
+            url = getSiteBaseUrl();
+        }
+        return normalizeBaseUrl(url);
     }
 
     /**
@@ -105,18 +117,18 @@ public class SystemConfigService {
     /**
      * 将相对路径解析为完整的公网可访问 URL
      * <p>
-     * 1. 已是完整 URL (http/https) → 直接返回
-    * 2. 预设画风图 (/art-styles/** 或 /api/art-styles/**) 统一映射到后端静态资源端点 /api/art-styles/**
-    * 3. 其他相对路径在有 site_base_url 时直接拼接
-    * 4. 没有 site_base_url 时，预设画风图返回相对 API 路径，兼容本地直连后端
+     * 1. 已是完整 URL (http/https) → OSS/CDN 直链直接返回，内部 /media/** 或 /api/art-styles/** 可按资源域名重写
+     * 2. 预设画风图 (/art-styles/** 或 /api/art-styles/**) 统一映射到后端静态资源端点 /api/art-styles/**
+     * 3. 其他相对路径优先用 asset_public_base_url/media_public_base_url 拼接，未配置时回退 site_base_url
+     * 4. 没有公网资源域名时，预设画风图返回相对 API 路径，兼容本地直连后端
      */
     public String resolvePublicUrl(String relativePath) {
         if (StrUtil.isBlank(relativePath)) {
             return null;
         }
-        // 已经是完整 URL（如 OSS 直链）
+        // 已经是完整 URL（如 OSS 直链）；内部静态资源 URL 可重写到资源公网域名。
         if (relativePath.startsWith("http://") || relativePath.startsWith("https://")) {
-            return relativePath;
+            return rewriteInternalPublicUrl(relativePath);
         }
         String normalizedPath = relativePath.startsWith("/") ? relativePath : "/" + relativePath;
         if (presetArtStyleResourceResolver.isPresetArtStylePath(normalizedPath)) {
@@ -124,18 +136,57 @@ public class SystemConfigService {
             if (StrUtil.isBlank(apiPath)) {
                 return normalizedPath;
             }
-            String siteBaseUrl = getSiteBaseUrl();
-            if (StrUtil.isBlank(siteBaseUrl)) {
+            String assetPublicBaseUrl = getAssetPublicBaseUrl();
+            if (StrUtil.isBlank(assetPublicBaseUrl)) {
                 return apiPath;
             }
-            return buildApiUrl(siteBaseUrl, apiPath);
+            return buildApiUrl(assetPublicBaseUrl, apiPath);
         }
-        // 拼接站点域名
-        String siteBaseUrl = getSiteBaseUrl();
-        if (StrUtil.isNotBlank(siteBaseUrl)) {
-            return siteBaseUrl + normalizedPath;
+        // 拼接资源公网域名
+        String assetPublicBaseUrl = getAssetPublicBaseUrl();
+        if (StrUtil.isNotBlank(assetPublicBaseUrl)) {
+            return assetPublicBaseUrl + normalizedPath;
         }
         return null;
+    }
+
+    private String rewriteInternalPublicUrl(String url) {
+        String assetPublicBaseUrl = getAssetPublicBaseUrl();
+        if (StrUtil.isBlank(assetPublicBaseUrl)) {
+            return url;
+        }
+        try {
+            URI uri = URI.create(url);
+            String path = uri.getRawPath();
+            if (!isInternalPublicPath(path)) {
+                return url;
+            }
+            StringBuilder rebuilt = new StringBuilder(buildApiUrl(assetPublicBaseUrl, path));
+            if (StrUtil.isNotBlank(uri.getRawQuery())) {
+                rebuilt.append('?').append(uri.getRawQuery());
+            }
+            if (StrUtil.isNotBlank(uri.getRawFragment())) {
+                rebuilt.append('#').append(uri.getRawFragment());
+            }
+            return rebuilt.toString();
+        } catch (Exception e) {
+            return url;
+        }
+    }
+
+    private boolean isInternalPublicPath(String path) {
+        if (StrUtil.isBlank(path)) {
+            return false;
+        }
+        String lower = path.toLowerCase();
+        return lower.startsWith("/media/") || lower.startsWith("/api/art-styles/") || lower.startsWith("/art-styles/");
+    }
+
+    private String normalizeBaseUrl(String url) {
+        if (StrUtil.isBlank(url)) {
+            return url;
+        }
+        return url.replaceAll("/+$", "");
     }
 
     private String buildApiUrl(String siteBaseUrl, String apiPath) {

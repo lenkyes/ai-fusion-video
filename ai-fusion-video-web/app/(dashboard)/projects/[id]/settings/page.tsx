@@ -163,7 +163,7 @@ export default function ProjectSettingsPage() {
     }
   }, []);
 
-  // 外网访问能力（site_base_url 或公有云存储）
+  // 外网访问能力（asset_public_base_url / site_base_url 或公有云存储）
   const [hasExternalAccess, setHasExternalAccess] = useState(false);
   const [hasStorage, setHasStorage] = useState(false);
 
@@ -176,7 +176,7 @@ export default function ProjectSettingsPage() {
         .then((list) => {
           const map: Record<string, string> = {};
           list.forEach((c) => { map[c.configKey] = c.configValue || ""; });
-          setHasExternalAccess(hasPublicStorage || !!map.site_base_url);
+          setHasExternalAccess(hasPublicStorage || !!map.asset_public_base_url || !!map.site_base_url);
         })
         .catch(console.error);
     }).catch(console.error);
