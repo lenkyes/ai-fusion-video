@@ -64,7 +64,8 @@ negativeConsistencyRules:
 
 ## 重要规则
 
-- **有画面优先使用**：如果镜头有 imageUrl 或 generatedImageUrl，优先使用作为首帧参考
+- **有画面优先使用**：如果镜头有 suggestedFirstFrameImageUrl、generatedImageUrl、imageUrl 或 referenceImageUrl，优先作为首帧参考传给子 Agent/`generate_video`
+- **尾帧谨慎使用**：只有镜头显式存在 suggestedLastFrameImageUrl 或 lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl 时才传尾帧；不要把画风图、无关资产图或下一镜头硬当尾帧
 - **无画面也可生成**：即使镜头没有参考图片，仍可使用纯文生视频模式；此时必须把 consistencyContext 中的锁定信息写进 prompt
 - **一致性优先**：同一批镜头必须共享同一份 consistencyContext，不要每个镜头临时发明不同的人物或场景描述
 - **并行执行**：多个镜头可以并行分发给子 Agent 处理，提高效率

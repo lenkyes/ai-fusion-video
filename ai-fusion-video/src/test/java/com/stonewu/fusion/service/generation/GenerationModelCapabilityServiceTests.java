@@ -5,7 +5,9 @@ import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.entity.generation.ImageTask;
 import com.stonewu.fusion.entity.generation.VideoTask;
+import com.stonewu.fusion.service.ai.ApiConfigService;
 import com.stonewu.fusion.service.ai.ModelPresetService;
+import com.stonewu.fusion.service.ai.model.AiModelMetadataResolver;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -14,11 +16,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class GenerationModelCapabilityServiceTests {
 
+                private final ApiConfigService apiConfigService = mock(ApiConfigService.class);
                 private final ModelPresetService presetService = createPresetService();
-                private final GenerationModelCapabilityService service = new GenerationModelCapabilityService(null, presetService);
+                private final GenerationModelCapabilityService service = new GenerationModelCapabilityService(
+                        new AiModelMetadataResolver(apiConfigService), presetService);
 
         private static ModelPresetService createPresetService() {
                 ModelPresetService presetService = new ModelPresetService();
@@ -114,7 +119,8 @@ class GenerationModelCapabilityServiceTests {
 
     @Test
     void shouldUsePresetCapabilityWhenModelConfigDoesNotContainNewFields() {
-        GenerationModelCapabilityService serviceWithPreset = new GenerationModelCapabilityService(null, new ModelPresetService() {
+        GenerationModelCapabilityService serviceWithPreset = new GenerationModelCapabilityService(
+                new AiModelMetadataResolver(apiConfigService), new ModelPresetService() {
             @Override
             public String getPresetConfig(String code) {
                 if (!"doubao-seedream-3-0-t2i-250415".equals(code)) {

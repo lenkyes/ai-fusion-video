@@ -12,11 +12,13 @@
 4. **识别对白**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt。
 5. **查询模型能力**：调用 `get_generation_model_capabilities` 获取当前视频模型支持情况，并进行参数裁剪：
    - `supportsFirstFrame=false`：不传 `firstFrameImageUrl`，在 prompt 中描述静态开场画面。
+   - `supportsLastFrame=false`：不传 `lastFrameImageUrl`，在 prompt 中描述结尾动作状态。
    - `supportsReferenceImages=false`：不传 `referenceImageUrls`，在 prompt 中详述角色/场景/道具外观特征。
    - `supportsReferenceVideos/Audios=false`：不传对应字段。禁止对不支持的参数做重复重试。
 6. **调用生成与更新**：
-   - 首帧图选择：优先 `generatedImageUrl`，否则 `imageUrl`。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一镜头重复创建远端视频任务。**
+   - 首帧图选择：若 `supportsFirstFrame=true`，必须优先传 `suggestedFirstFrameImageUrl`；若该字段为空，则按 `generatedImageUrl` → `imageUrl` → `referenceImageUrl` 选择。
+   - 尾帧图选择：若 `supportsLastFrame=true` 且 `suggestedLastFrameImageUrl` 或镜头自定义数据中存在 `lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl`，传入 `lastFrameImageUrl`；不要为了凑尾帧把项目画风图或无关资产图当尾帧。
+   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一镜头重复创建远端视频任务。**
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。
    - 如果 `generate_video` 返回 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得再次调用 `generate_video` 重试同一镜头；直接保存/保留 videoPrompt 并报告失败原因。
 
@@ -54,7 +56,7 @@
 
 ### B. 结构与格式要求
 - 使用**中文**自然语言叙述，不堆砌关键词，篇幅 2-5 句（复杂场景不超过 8 句）。
-- **首帧图自适应**：有首帧图（I2V 模式）时，只描述动作变化和运镜，不要重复描述静态内容；无首帧图（T2V 模式）时，需完整描述画面静态和动态。
+- **首尾帧图自适应**：有首帧图（I2V 模式）时，只描述动作变化和运镜，不要重复描述静态内容；同时有尾帧图时，prompt 要描述从首帧自然运动到尾帧的过程，不要写与尾帧冲突的结尾画面；无首帧图（T2V 模式）时，需完整描述画面静态和动态。
 - **运镜/景别标准转写**：
   - **运镜**：推 → 镜头推近 | 拉 → 镜头拉远 | 摇 → 水平摇移 | 移 → 平移跟随 | 跟 → 跟随主体 | 升 → 镜头升起 | 降 → 镜头降落 | 环绕 → 环绕旋转 | 甩 → 快速甩动 | 固定/空/不动 → 固定镜头
   - **景别**：远景 → 大全景 | 全景 → 全景画面 | 中景 → 中景呈现 | 近景 → 近景展示 | 特写 → 极近特写

@@ -132,6 +132,7 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
         JSONObject snapshot = generationModelCapabilityService.buildVideoCapabilitySnapshot(resolvedModel.model());
         boolean strategySupported = videoGenerationStrategyRouter.supports(resolvedModel.model());
         boolean supportsFirstFrame = snapshot.getBool("supportsFirstFrame", false);
+        boolean supportsLastFrame = snapshot.getBool("supportsLastFrame", false);
         boolean supportsReferenceImages = snapshot.getBool("supportsReferenceImages", false);
         boolean supportsReferenceVideos = snapshot.getBool("supportsReferenceVideos", false);
         boolean supportsReferenceAudios = snapshot.getBool("supportsReferenceAudios", false);
@@ -146,6 +147,7 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
         } else {
             snapshot.set("toolGuidance", buildVideoGuidance(
                     supportsFirstFrame,
+                    supportsLastFrame,
                     supportsReferenceImages,
                     supportsReferenceVideos,
                     supportsReferenceAudios));
@@ -154,6 +156,7 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
     }
 
     private String buildVideoGuidance(boolean supportsFirstFrame,
+                                      boolean supportsLastFrame,
                                       boolean supportsReferenceImages,
                                       boolean supportsReferenceVideos,
                                       boolean supportsReferenceAudios) {
@@ -161,6 +164,10 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
         hints.add(supportsFirstFrame
                 ? "可以传 firstFrameImageUrl 锁定开场画面。"
                 : "不要传 firstFrameImageUrl，改为在 prompt 中完整描述静态画面。"
+        );
+        hints.add(supportsLastFrame
+                ? "可以传 lastFrameImageUrl 约束结尾画面，但只能使用当前镜头明确的尾帧图。"
+                : "不要传 lastFrameImageUrl，改为在 prompt 中描述结尾动作状态。"
         );
         hints.add(supportsReferenceImages
                 ? "可以传 referenceImageUrls，用 图片1、图片2 等在 prompt 中引用。"

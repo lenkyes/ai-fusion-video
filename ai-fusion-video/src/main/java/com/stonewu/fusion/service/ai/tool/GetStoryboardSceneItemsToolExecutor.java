@@ -275,7 +275,13 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
                     .set("focalLength", item.getFocalLength())
                     .set("transition", item.getTransition())
                     .set("imageUrl", item.getImageUrl())
+                    .set("referenceImageUrl", item.getReferenceImageUrl())
                     .set("generatedImageUrl", item.getGeneratedImageUrl())
+                    .set("suggestedFirstFrameImageUrl", firstNonBlank(
+                            item.getGeneratedImageUrl(),
+                            item.getImageUrl(),
+                            item.getReferenceImageUrl()))
+                    .set("suggestedLastFrameImageUrl", extractLastFrameImageUrl(item.getCustomData()))
                     .set("videoUrl", item.getVideoUrl())
                     .set("generatedVideoUrl", item.getGeneratedVideoUrl())
                     .set("videoPrompt", item.getVideoPrompt())
@@ -354,6 +360,34 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
 
     private String errorResult(String message) {
         return JSONUtil.createObj().set("status", "error").set("message", message).toString();
+    }
+
+    private String extractLastFrameImageUrl(String customData) {
+        if (StrUtil.isBlank(customData)) {
+            return null;
+        }
+        try {
+            JSONObject data = JSONUtil.parseObj(customData);
+            return firstNonBlank(
+                    data.getStr("lastFrameImageUrl"),
+                    data.getStr("endFrameImageUrl"),
+                    data.getStr("tailFrameImageUrl"),
+                    data.getStr("lastFrameUrl"));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

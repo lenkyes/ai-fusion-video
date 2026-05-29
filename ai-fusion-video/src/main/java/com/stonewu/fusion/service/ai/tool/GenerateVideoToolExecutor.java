@@ -7,6 +7,7 @@ import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.entity.generation.VideoItem;
 import com.stonewu.fusion.entity.generation.VideoTask;
+import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
@@ -14,6 +15,7 @@ import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
+import com.stonewu.fusion.service.storyboard.StoryboardService;
 import com.stonewu.fusion.service.system.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +51,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private final GenerationModelCapabilityService generationModelCapabilityService;
     private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
     private final SystemConfigService systemConfigService;
+    private final StoryboardService storyboardService;
 
     @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
     private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
@@ -168,12 +171,40 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 return errorResult("缺少 prompt");
             }
 
-            String firstFrameImageUrl = resolvePublicMediaUrl(params.getStr("firstFrameImageUrl"), "firstFrameImageUrl");
-            String lastFrameImageUrl = resolvePublicMediaUrl(params.getStr("lastFrameImageUrl"), "lastFrameImageUrl");
             String ratio = params.getStr("ratio", "16:9");
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
             Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
+
+            AiModel model = resolvePreferredModel();
+            modelId = model.getId();
+            idempotencyCategory = storyboardItemCategory(storyboardItemId);
+            VideoTask existingTask = findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
+            if (existingTask != null) {
+                return handleExistingVideoTask(existingTask, prompt, effectiveWaitTimeoutMsOrDefault());
+            }
+
+            GenerationModelCapabilityService.VideoModelCapability capability =
+                    generationModelCapabilityService.resolveVideoCapability(model);
+
+            String firstFrameImageUrl = params.getStr("firstFrameImageUrl");
+            String lastFrameImageUrl = params.getStr("lastFrameImageUrl");
+            if (storyboardItemId != null) {
+                StoryboardFrameInputs frameInputs = resolveStoryboardFrameInputs(storyboardItemId);
+                if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)
+                        && StrUtil.isNotBlank(frameInputs.firstFrameImageUrl())) {
+                    firstFrameImageUrl = frameInputs.firstFrameImageUrl();
+                    log.info("[generate_video] 自动使用分镜镜头首帧图: storyboardItemId={}", storyboardItemId);
+                }
+                if (supportsLastFrame(capability) && StrUtil.isBlank(lastFrameImageUrl)
+                        && StrUtil.isNotBlank(frameInputs.lastFrameImageUrl())) {
+                    lastFrameImageUrl = frameInputs.lastFrameImageUrl();
+                    log.info("[generate_video] 自动使用分镜镜头尾帧图: storyboardItemId={}", storyboardItemId);
+                }
+            }
+
+            firstFrameImageUrl = resolvePublicMediaUrl(firstFrameImageUrl, "firstFrameImageUrl");
+            lastFrameImageUrl = resolvePublicMediaUrl(lastFrameImageUrl, "lastFrameImageUrl");
 
             // 解析多模态参考图片列表。预设画风图只参与文字风格，不作为视频主体参考图传给上游。
             List<String> referenceImageUrlList = collectMediaUrls(params, "referenceImageUrls", true);
@@ -187,14 +218,6 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             // 确定生成模式
             String generateMode = StrUtil.isNotBlank(firstFrameImageUrl) ? "image2video" : "text2video";
-
-            AiModel model = resolvePreferredModel();
-            modelId = model.getId();
-            idempotencyCategory = storyboardItemCategory(storyboardItemId);
-            VideoTask existingTask = findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
-            if (existingTask != null) {
-                return handleExistingVideoTask(existingTask, prompt, effectiveWaitTimeoutMsOrDefault());
-            }
 
             // 构建生视频任务
             task = VideoTask.builder()
@@ -217,10 +240,11 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             generationModelCapabilityService.validateVideoTask(model, task);
             long effectiveWaitTimeoutMs = resolveWaitTimeoutMs();
 
-            log.info("[generate_video] 提交生视频任务: prompt={}, mode={}, ratio={}, duration={}s, modelId={}, modelCode={}, waitTimeout={}ms, 首帧: {}, 参考图: {}张",
+            log.info("[generate_video] 提交生视频任务: prompt={}, mode={}, ratio={}, duration={}s, modelId={}, modelCode={}, waitTimeout={}ms, 首帧: {}, 尾帧: {}, 参考图: {}张",
                     StrUtil.sub(prompt, 0, 80), generateMode, ratio, duration, model.getId(), model.getCode(),
                     effectiveWaitTimeoutMs,
                     firstFrameImageUrl != null ? "有" : "无",
+                    lastFrameImageUrl != null ? "有" : "无",
                     referenceImageUrlList.size());
 
             // 提交到队列并同步等待结果
@@ -415,6 +439,64 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
     }
 
+    private StoryboardFrameInputs resolveStoryboardFrameInputs(Long storyboardItemId) {
+        if (storyboardItemId == null) {
+            return StoryboardFrameInputs.EMPTY;
+        }
+        try {
+            StoryboardItem item = storyboardService.getItemById(storyboardItemId);
+            if (item == null) {
+                return StoryboardFrameInputs.EMPTY;
+            }
+            String firstFrameImageUrl = firstNonBlank(
+                    item.getGeneratedImageUrl(),
+                    item.getImageUrl(),
+                    item.getReferenceImageUrl());
+            String lastFrameImageUrl = extractLastFrameImageUrl(item.getCustomData());
+            return new StoryboardFrameInputs(firstFrameImageUrl, lastFrameImageUrl);
+        } catch (Exception e) {
+            log.warn("[generate_video] 读取分镜首尾帧失败: storyboardItemId={}, reason={}",
+                    storyboardItemId, e.getMessage());
+            return StoryboardFrameInputs.EMPTY;
+        }
+    }
+
+    private String extractLastFrameImageUrl(String customData) {
+        if (StrUtil.isBlank(customData)) {
+            return null;
+        }
+        try {
+            JSONObject data = JSONUtil.parseObj(customData);
+            return firstNonBlank(
+                    data.getStr("lastFrameImageUrl"),
+                    data.getStr("endFrameImageUrl"),
+                    data.getStr("tailFrameImageUrl"),
+                    data.getStr("lastFrameUrl"));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean supportsFirstFrame(GenerationModelCapabilityService.VideoModelCapability capability) {
+        return capability == null || capability.supportsFirstFrame();
+    }
+
+    private boolean supportsLastFrame(GenerationModelCapabilityService.VideoModelCapability capability) {
+        return capability == null || capability.supportsLastFrame();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private List<String> collectMediaUrls(JSONObject params, String fieldName, boolean skipPresetArtStyles) {
         cn.hutool.json.JSONArray arr = params.getJSONArray(fieldName);
         if (arr == null || arr.isEmpty()) {
@@ -483,5 +565,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             lower = pathStart >= 0 ? lower.substring(pathStart) : "/";
         }
         return lower.startsWith("/api/art-styles/") || lower.startsWith("/art-styles/");
+    }
+
+    private record StoryboardFrameInputs(String firstFrameImageUrl, String lastFrameImageUrl) {
+        private static final StoryboardFrameInputs EMPTY = new StoryboardFrameInputs(null, null);
     }
 }
