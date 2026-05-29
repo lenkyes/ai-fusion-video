@@ -162,6 +162,7 @@ export interface StoryboardItemCreateReq {
   shotType?: string;
   content?: string;
   sceneExpectation?: string;
+  sound?: string;
   dialogue?: string;
   soundEffect?: string;
   music?: string;
@@ -182,6 +183,7 @@ export interface StoryboardItemUpdateReq {
   shotType?: string;
   content?: string;
   sceneExpectation?: string;
+  sound?: string;
   dialogue?: string;
   soundEffect?: string;
   music?: string;

@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function EditableCell({
   value,
@@ -11,6 +12,7 @@ export function EditableCell({
   onCellClick,
   className,
   multiline,
+  previewLineClamp,
 }: {
   value: string;
   placeholder?: string;
@@ -18,6 +20,7 @@ export function EditableCell({
   onCellClick?: () => void;
   className?: string;
   multiline?: boolean;
+  previewLineClamp?: 3;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -108,7 +111,7 @@ export function EditableCell({
     );
   }
 
-  return (
+  const previewCell = (
     <div
       onClick={(e) => {
         onCellClick?.();
@@ -118,6 +121,7 @@ export function EditableCell({
       className={cn(
         // 撑满整个单元格
         "relative w-full h-full min-h-[32px] flex items-center",
+        previewLineClamp && "items-start",
         // hover 效果
         "px-2 py-1.5 rounded-md cursor-pointer",
         "border border-transparent",
@@ -128,12 +132,36 @@ export function EditableCell({
         !value && "text-muted-foreground/30 italic",
         className
       )}
-      title="点击编辑"
+      title={previewLineClamp && value ? undefined : "点击编辑"}
     >
-      <span className="flex-1 whitespace-pre-wrap break-words">{value || placeholder || "\u00a0"}</span>
+      <span
+        className={cn(
+          "flex-1 whitespace-pre-wrap break-words",
+          previewLineClamp === 3 && "line-clamp-3 pr-7"
+        )}
+      >
+        {value || placeholder || "\u00a0"}
+      </span>
       <div className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 rounded-lg flex items-center justify-center invisible group-hover/cell:visible backdrop-blur-xl bg-white/70 shadow-sm z-10">
         <Pencil className="h-3.5 w-3.5 text-primary" />
       </div>
     </div>
   );
+
+  if (previewLineClamp && value) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={previewCell} />
+        <TooltipContent
+          side="top"
+          align="start"
+          className="max-w-[520px] whitespace-pre-wrap break-words rounded-lg bg-white/95 px-3 py-2 text-left text-[11px] leading-relaxed text-zinc-900 shadow-lg dark:bg-zinc-900/95 dark:text-zinc-50"
+        >
+          {value}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return previewCell;
 }

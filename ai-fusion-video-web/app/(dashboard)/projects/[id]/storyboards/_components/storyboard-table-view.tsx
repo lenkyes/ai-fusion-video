@@ -51,6 +51,8 @@ type StoryboardTableField =
   | "content"
   | "dialogue"
   | "sound"
+  | "soundEffect"
+  | "music"
   | "remark"
   | "assets";
 
@@ -68,12 +70,6 @@ const COLUMNS: ColumnDef[] = [
   { label: "镜号", field: "shotNumber", initW: 48, minW: 40 },
   { label: "画面", field: "imageUrl", initW: 80, minW: 60, isImage: true },
   { label: "视频", field: "generatedVideoUrl", initW: 80, minW: 60, isVideo: true },
-  { label: "视频提示词", field: "videoPrompt", initW: 200, minW: 80, multiline: true },
-  { label: "关联资产", field: "assets", initW: 160, minW: 100 },
-  { label: "景别", field: "shotType", initW: 64, minW: 50 },
-  { label: "时长", field: "duration", initW: 48, minW: 40 },
-  { label: "摄像机角度", field: "cameraAngle", initW: 90, minW: 60 },
-  { label: "运镜", field: "cameraMovement", initW: 80, minW: 50 },
   {
     label: "分镜内容",
     field: "content",
@@ -81,8 +77,16 @@ const COLUMNS: ColumnDef[] = [
     minW: 100,
     multiline: true,
   },
-  { label: "对白", field: "dialogue", initW: 200, minW: 80, multiline: true },
-  { label: "声音", field: "sound", initW: 100, minW: 60 },
+  { label: "台词/旁白", field: "dialogue", initW: 200, minW: 80, multiline: true },
+  { label: "声音", field: "sound", initW: 120, minW: 70 },
+  { label: "音效", field: "soundEffect", initW: 120, minW: 70 },
+  { label: "音乐", field: "music", initW: 120, minW: 70 },
+  { label: "视频提示词", field: "videoPrompt", initW: 200, minW: 80, multiline: true },
+  { label: "关联资产", field: "assets", initW: 160, minW: 100 },
+  { label: "景别", field: "shotType", initW: 64, minW: 50 },
+  { label: "时长", field: "duration", initW: 48, minW: 40 },
+  { label: "摄像机角度", field: "cameraAngle", initW: 90, minW: 60 },
+  { label: "运镜", field: "cameraMovement", initW: 80, minW: 50 },
   { label: "备注", field: "remark", initW: 100, minW: 60 },
 ];
 
@@ -91,7 +95,7 @@ const DRAG_COL_W = 28;
 const ACTION_COL_W = 56;
 
 /** localStorage key for persisting column widths */
-const COL_WIDTHS_STORAGE_KEY = "fusion-storyboard-col-widths";
+const COL_WIDTHS_STORAGE_KEY = "fusion-storyboard-col-widths-v2";
 
 /** 从 localStorage 读取保存的列宽（列数变化时自动 fallback） */
 function loadSavedColWidths(): number[] {
@@ -694,10 +698,13 @@ export function StoryboardTableView({
                           col.field === "shotNumber"
                             ? "font-mono text-muted-foreground text-center"
                             : col.field === "content"
-                            ? ""
+                            ? "text-left"
+                            : col.multiline
+                            ? "text-muted-foreground text-left"
                             : "text-muted-foreground text-center"
                         )}
                         multiline={col.multiline}
+                        previewLineClamp={col.field === "videoPrompt" ? 3 : undefined}
                       />
                     )}
                   </div>
