@@ -502,16 +502,20 @@ public class AiAgentRegistry {
                                                                                 - storyboardItemId: 分镜条目ID（数字，必传）
                                                                                 - projectId: 项目ID（数字，必传）
                                                                                 - promptOnly: true/false（仅生成提示词时传 true）
+                                                                                - forceRegenerate: true/false（上下文有 forceRegenerate=true、overwriteExistingVideo=true，或用户明确要求重新生成/覆盖时传 true）
+                                                                                - generationRequestId: 本次用户提交的唯一请求ID（若上下文提供则原样传递，禁止编造）
                                                                                 - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
                                                                                 - 不要把分镜条目ID传给 storyboardSceneId 或 sceneId；生成视频时必须使用 storyboardItemId
-                                                                                - 如果视频生成返回 retryable=false、remoteTaskSubmitted=true、平台任务ID、HTTP 4xx 或资源不可访问，不要再次为同一 storyboardItemId 调用 generate_video
+                                                                                - 如果视频生成返回 retryable=false、remoteTaskSubmitted=true、平台任务ID、HTTP 4xx 或资源不可访问，不要再次为同一 storyboardItemId 调用 generate_video；即使 forceRegenerate=true 也不要在同一轮失败后重试
 
                                                                                 message 格式模板（具体内容必须来自 get_project / get_storyboard_scene_items 查询结果，不要照抄占位符）：
                                                                                 请为分镜镜头生成视频。
                                                                                 storyboardItemId: {storyboardItemId}
                                                                                 projectId: {projectId}
                                                                                 promptOnly: false
+                                                                                forceRegenerate: false
+                                                                                generationRequestId: {generationRequestId 或留空}
                                                                                 consistencyContext:
                                                                                 styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
                                                                                 referenceOrderPolicy: {视频参考图只包含角色、场景、关键道具等资产图；不要传项目预设画风图、/api/art-styles/** 或 /art-styles/**；角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}

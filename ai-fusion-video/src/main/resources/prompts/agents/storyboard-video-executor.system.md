@@ -4,7 +4,7 @@
 
 ## 1. 业务流程与输入约束
 
-1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
+1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）。`artStyleInfo.referenceImageUrl` 只可用于理解画风，不得放入视频 `referenceImageUrls`。
 3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
    - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），最多 5 张。不要把 `/api/art-styles/**`、`/art-styles/**` 或项目预设画风图放入 `referenceImageUrls`。
@@ -18,7 +18,9 @@
 6. **调用生成与更新**：
    - 首帧图选择：若 `supportsFirstFrame=true`，必须优先传 `suggestedFirstFrameImageUrl`；若该字段为空，则按 `generatedImageUrl` → `imageUrl` → `referenceImageUrl` 选择。
    - 尾帧图选择：若 `supportsLastFrame=true` 且 `suggestedLastFrameImageUrl` 或镜头自定义数据中存在 `lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl`，传入 `lastFrameImageUrl`；不要为了凑尾帧把项目画风图或无关资产图当尾帧。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一镜头重复创建远端视频任务。**
+   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一轮里重复创建远端视频任务。**
+   - 当输入包含 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确要求“重新生成/再次生成/覆盖生成/重做失败镜头”时，传 `forceRegenerate=true`，允许绕过已有失败或已完成历史任务；如果输入有 `generationRequestId`，必须原样传给 `generate_video`，用于阻止同一次用户提交内重复创建远端任务。
+   - 如果本轮 `generate_video` 已返回 `retryable=false`，不得再用 `forceRegenerate=true` 立刻重试同一镜头。
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。
    - 如果 `generate_video` 返回 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得再次调用 `generate_video` 重试同一镜头；直接保存/保留 videoPrompt 并报告失败原因。
 

@@ -116,4 +116,37 @@ public class VideoGenerationService {
                 .last("LIMIT 1");
         return taskMapper.selectOne(wrapper);
     }
+
+    public VideoTask findLatestByCategoryFamily(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return null;
+        }
+        String scopedPrefix = category + ":";
+        LambdaQueryWrapper<VideoTask> wrapper = new LambdaQueryWrapper<VideoTask>()
+                .and(w -> w.eq(VideoTask::getCategory, category)
+                        .or()
+                        .likeRight(VideoTask::getCategory, scopedPrefix))
+                .eq(userId != null, VideoTask::getUserId, userId)
+                .eq(modelId != null, VideoTask::getModelId, modelId)
+                .orderByDesc(VideoTask::getCreateTime)
+                .last("LIMIT 1");
+        return taskMapper.selectOne(wrapper);
+    }
+
+    public VideoTask findLatestActiveByCategoryFamily(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return null;
+        }
+        String scopedPrefix = category + ":";
+        LambdaQueryWrapper<VideoTask> wrapper = new LambdaQueryWrapper<VideoTask>()
+                .and(w -> w.eq(VideoTask::getCategory, category)
+                        .or()
+                        .likeRight(VideoTask::getCategory, scopedPrefix))
+                .in(VideoTask::getStatus, 0, 1)
+                .eq(userId != null, VideoTask::getUserId, userId)
+                .eq(modelId != null, VideoTask::getModelId, modelId)
+                .orderByDesc(VideoTask::getCreateTime)
+                .last("LIMIT 1");
+        return taskMapper.selectOne(wrapper);
+    }
 }

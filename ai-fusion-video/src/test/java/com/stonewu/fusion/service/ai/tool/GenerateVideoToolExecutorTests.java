@@ -150,7 +150,7 @@ class GenerateVideoToolExecutorTests {
 
         when(aiModelService.getDefaultByType(3)).thenReturn(model);
         when(strategyRouter.supports(model)).thenReturn(true);
-        when(videoGenerationService.findLatestByCategory("storyboard_item:3308", 7L, 31L)).thenReturn(existingTask);
+        when(videoGenerationService.findLatestByCategoryFamily("storyboard_item:3308", 7L, 31L)).thenReturn(existingTask);
         when(videoGenerationService.listItems(88L)).thenReturn(List.of(VideoItem.builder()
                 .platformTaskId("remote-task-1")
                 .build()));
@@ -172,6 +172,230 @@ class GenerateVideoToolExecutorTests {
         assertThat(result).contains("\"retryable\":false");
         assertThat(result).contains("\"remoteTaskSubmitted\":true");
         assertThat(result).contains("remote-task-1");
+    }
+
+    @Test
+    void shouldCreateNewTaskForFailedStoryboardTaskWhenForceRegenerateIsTrue() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        VideoTask existingTask = VideoTask.builder()
+                .id(88L)
+                .taskId("task-88")
+                .status(3)
+                .category("storyboard_item:3308")
+                .build();
+        VideoTask completedTask = VideoTask.builder().id(95L).taskId("task-95").status(2).build();
+
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(videoGenerationService.findLatestByCategoryFamily("storyboard_item:3308", 7L, 31L)).thenReturn(existingTask);
+        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completedTask);
+        when(videoGenerationService.listItems(95L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://example.test/regenerated.mp4")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService,
+                storyboardService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "storyboardItemId": 3308,
+                  "forceRegenerate": true,
+                  "generationRequestId": "request-20260529"
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
+        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
+        assertThat(taskCaptor.getValue().getCategory())
+                .isEqualTo("storyboard_item:3308:request:request-20260529");
+        assertThat(result).contains("\"status\":\"success\"");
+        assertThat(result).contains("regenerated.mp4");
+    }
+
+    @Test
+    void shouldNotCreateSecondRemoteTaskForSameRegenerationRequest() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        VideoTask existingTask = VideoTask.builder()
+                .id(96L)
+                .taskId("task-96")
+                .status(3)
+                .category("storyboard_item:3308:request:request-20260529")
+                .build();
+
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(videoGenerationService.findLatestByCategoryFamily("storyboard_item:3308", 7L, 31L))
+                .thenReturn(existingTask);
+        when(videoGenerationService.listItems(96L)).thenReturn(List.of(VideoItem.builder()
+                .platformTaskId("remote-task-96")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService,
+                storyboardService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "storyboardItemId": 3308,
+                  "forceRegenerate": true,
+                  "generationRequestId": "request-20260529"
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        verify(videoGenerationConsumer, never()).submitAndWait(any(VideoTask.class), anyLong());
+        assertThat(result).contains("\"status\":\"error\"");
+        assertThat(result).contains("\"retryable\":false");
+        assertThat(result).contains("\"remoteTaskSubmitted\":true");
+        assertThat(result).contains("remote-task-96");
+    }
+
+    @Test
+    void shouldCreateNewTaskForCompletedStoryboardTaskWhenForceRegenerateHasNewRequestId() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        VideoTask existingTask = VideoTask.builder()
+                .id(97L)
+                .taskId("task-97")
+                .status(2)
+                .category("storyboard_item:3308:request:old-request")
+                .build();
+        VideoTask completedTask = VideoTask.builder().id(98L).taskId("task-98").status(2).build();
+
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(videoGenerationService.findLatestByCategoryFamily("storyboard_item:3308", 7L, 31L))
+                .thenReturn(existingTask);
+        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completedTask);
+        when(videoGenerationService.listItems(98L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://example.test/new-regenerated.mp4")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService,
+                storyboardService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "storyboardItemId": 3308,
+                  "forceRegenerate": true,
+                  "generationRequestId": "new-request"
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
+        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
+        assertThat(taskCaptor.getValue().getCategory()).isEqualTo("storyboard_item:3308:request:new-request");
+        assertThat(result).contains("\"status\":\"success\"");
+        assertThat(result).contains("new-regenerated.mp4");
+    }
+
+    @Test
+    void shouldWaitForActiveStoryboardTaskEvenWhenForceRegenerateIsTrue() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(31L)
+                .status(1)
+                .code("seedance")
+                .build();
+        VideoTask activeTask = VideoTask.builder()
+                .id(99L)
+                .taskId("task-active")
+                .status(1)
+                .category("storyboard_item:3308:request:running-request")
+                .build();
+        VideoTask completedTask = VideoTask.builder().id(100L).taskId("task-active").status(2).build();
+
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(videoGenerationService.findLatestActiveByCategoryFamily("storyboard_item:3308", 7L, 31L))
+                .thenReturn(activeTask);
+        when(videoGenerationConsumer.waitForTask("task-active", 7200000L)).thenReturn(completedTask);
+        when(videoGenerationService.listItems(100L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://example.test/active-result.mp4")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService,
+                videoGenerationService,
+                videoGenerationConsumer,
+                capabilityService,
+                strategyRouter,
+                systemConfigService,
+                storyboardService);
+
+        String result = executor.execute("""
+                {
+                  "prompt": "镜头缓慢推进",
+                  "storyboardItemId": 3308,
+                  "forceRegenerate": true,
+                  "generationRequestId": "new-request"
+                }
+                """, ToolExecutionContext.builder().userId(7L).build());
+
+        verify(videoGenerationConsumer, never()).submitAndWait(any(VideoTask.class), anyLong());
+        assertThat(result).contains("\"status\":\"success\"");
+        assertThat(result).contains("active-result.mp4");
     }
 
     @Test

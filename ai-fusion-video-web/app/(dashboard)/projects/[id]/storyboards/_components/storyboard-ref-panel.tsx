@@ -252,6 +252,10 @@ function SceneAssetPanel({
 
   /** 批量生视频确认 */
   const handleVideoGenConfirm = (selectedItemIds: number[], promptOnly?: boolean) => {
+    const generationRequestId = `storyboard-video-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
     addPipeline({
       label: promptOnly
         ? `批量生成视频提示词 (${selectedItemIds.length} 个镜头)`
@@ -264,7 +268,9 @@ function SceneAssetPanel({
           selectedStoryboardItemIds: selectedItemIds,
           storyboardId: storyboard.id,
           promptOnly: promptOnly || false,
+          forceRegenerate: true,
           overwriteExistingVideo: true,
+          generationRequestId,
         },
       },
       onComplete: () => {

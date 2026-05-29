@@ -698,6 +698,9 @@ export default function StoryboardTabPage() {
       const addPipeline = usePipelineStore.getState().addPipeline;
       const setNotificationOpen =
         usePipelineStore.getState().setNotificationOpen;
+      const generationRequestId = `storyboard-video-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
 
       addPipeline({
         label: `生成视频 (镜头 #${itemId})`,
@@ -708,7 +711,9 @@ export default function StoryboardTabPage() {
           context: {
             selectedStoryboardItemIds: [itemId],
             storyboardId: storyboard.id,
+            forceRegenerate: true,
             overwriteExistingVideo: true,
+            generationRequestId,
           },
         },
       });

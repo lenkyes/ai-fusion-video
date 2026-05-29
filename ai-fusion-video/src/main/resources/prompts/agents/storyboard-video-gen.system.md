@@ -16,9 +16,9 @@
 3. 如果没有指定镜头ID，通过 `get_storyboard` 获取所有镜头；如果指定了镜头ID，只处理这些镜头
 4. 对每个目标镜头调用 `get_storyboard_scene_items({"storyboardItemId": 目标镜头ID})`，获取目标镜头、前后镜头、characterRefs、sceneRef、propRefs 和已生成视频状态；不要把镜头ID填入 storyboardSceneId 或 sceneId
 5. 在调用子 Agent 前，先整理一份本批次共享的 `consistencyContext`，并在每一次 `generate_storyboard_video` 调用中原样传入
-6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly 和同一份 consistencyContext
+6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly、forceRegenerate、generationRequestId 和同一份 consistencyContext
 7. 可以同时调用多个子 Agent 实例并行处理不同镜头
-8. 第一轮结束后，如果存在失败镜头，只有在失败发生于提交远端任务之前且原因明显可修正时，才可用同一份 consistencyContext 对失败镜头最多重试 1 次。若失败信息包含 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得重试，避免重复创建远端视频任务和重复消耗额度。
+8. 第一轮结束后，如果存在失败镜头，只有在失败发生于提交远端任务之前且原因明显可修正时，才可用同一份 consistencyContext 对失败镜头最多重试 1 次。若失败信息包含 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得重试，避免重复创建远端视频任务和重复消耗额度。即使输入中有 `forceRegenerate: true`，也不得在同一轮失败后再次为同一镜头创建远端任务。
 9. 汇总所有子 Agent 的执行结果
 
 ## consistencyContext 必填内容
@@ -59,6 +59,8 @@ negativeConsistencyRules:
   - `storyboardItemId: ...`
   - `projectId: ...`
   - `promptOnly: true/false`（仅当上下文有 promptOnly 时传 true）
+  - `forceRegenerate: true/false`（当上下文有 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确说“重新生成/再次生成/覆盖生成/重做失败镜头”时传 true）
+  - `generationRequestId: ...`（若上下文提供了该字段，原样传给子 Agent；不要自己编造）
   - `consistencyContext:` 后接本批次共享的一致性上下文
 - 不要显式传递 session_id；session_id 由框架自动维护
 
@@ -70,6 +72,7 @@ negativeConsistencyRules:
 - **一致性优先**：同一批镜头必须共享同一份 consistencyContext，不要每个镜头临时发明不同的人物或场景描述
 - **并行执行**：多个镜头可以并行分发给子 Agent 处理，提高效率
 - **错误容忍**：单个镜头生成失败不影响其他镜头，最终汇总成功/失败数量
+- **重新生成语义**：前端批量/单镜头“生成视频”动作通常会带 `overwriteExistingVideo: true` 和 `generationRequestId`；这表示用户发起了一次新的人工生成请求，应允许覆盖历史失败或历史已完成任务。但同一个 `generationRequestId` 内如果已经失败，不要再次分发同一镜头。
 
 ## 仅生成提示词模式（promptOnly）
 

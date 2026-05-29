@@ -140,6 +140,15 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .set("storyboardItemId", JSONUtil.createObj()
                         .set("type", "integer")
                         .set("description", "分镜镜头ID；批量分镜生成时必须传，用于幂等防重复提交远端视频任务"))
+                    .set("forceRegenerate", JSONUtil.createObj()
+                        .set("type", "boolean")
+                        .set("description", "用户明确要求重新生成/覆盖已有失败或成功任务时传 true；同一轮失败自动重试不要传 true"))
+                    .set("overwriteExistingVideo", JSONUtil.createObj()
+                        .set("type", "boolean")
+                        .set("description", "兼容字段，含义等同 forceRegenerate"))
+                    .set("generationRequestId", JSONUtil.createObj()
+                        .set("type", "string")
+                        .set("description", "本次用户提交的唯一请求ID；重新生成时传入，用于区分新请求和同一轮重复调用"))
                     .set("ratio", JSONUtil.createObj()
                         .set("type", "string")
                         .set("description", "画面比例，如 16:9、9:16、1:1（默认 16:9）"))
@@ -161,6 +170,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     @Override
     public String execute(String toolInput, ToolExecutionContext context) {
         String idempotencyCategory = null;
+        String storyboardCategory = null;
         Long userId = context != null ? context.getUserId() : null;
         Long modelId = null;
         VideoTask task = null;
@@ -175,13 +185,24 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
             Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
+            boolean forceRegenerate = params.getBool("forceRegenerate",
+                    params.getBool("overwriteExistingVideo", false));
+            String generationRequestId = params.getStr("generationRequestId");
 
             AiModel model = resolvePreferredModel();
             modelId = model.getId();
-            idempotencyCategory = storyboardItemCategory(storyboardItemId);
-            VideoTask existingTask = findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
-            if (existingTask != null) {
+            storyboardCategory = storyboardItemCategory(storyboardItemId);
+            idempotencyCategory = resolveIdempotencyCategory(storyboardCategory, forceRegenerate, generationRequestId);
+            VideoTask existingTask = findActiveStoryboardVideoTask(storyboardCategory, userId, modelId);
+            if (existingTask == null) {
+                existingTask = findExistingStoryboardVideoTask(storyboardCategory, userId, modelId);
+            }
+            if (shouldUseExistingTask(existingTask, forceRegenerate, idempotencyCategory)) {
                 return handleExistingVideoTask(existingTask, prompt, effectiveWaitTimeoutMsOrDefault());
+            }
+            if (existingTask != null && forceRegenerate) {
+                log.info("[generate_video] 用户要求重新生成，忽略已有非运行中的历史分镜视频任务: storyboardItemId={}, existingTaskId={}, status={}, newCategory={}",
+                        storyboardItemId, existingTask.getId(), existingTask.getStatus(), idempotencyCategory);
             }
 
             GenerationModelCapabilityService.VideoModelCapability capability =
@@ -273,7 +294,10 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             log.error("[generate_video] 生成视频失败", e);
             VideoTask failedTask = task != null && task.getId() != null
                     ? task
-                    : findExistingStoryboardVideoTask(idempotencyCategory, userId, modelId);
+                    : findExistingStoryboardVideoTask(
+                            StrUtil.isNotBlank(storyboardCategory) ? storyboardCategory : idempotencyCategory,
+                            userId,
+                            modelId);
             if (failedTask != null && StrUtil.isNotBlank(idempotencyCategory)) {
                 return nonRetryableExistingTaskResult(failedTask,
                         "生成失败，已阻止同一镜头重复创建远端视频任务: " + e.getMessage());
@@ -359,13 +383,37 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         if (StrUtil.isBlank(category)) {
             return null;
         }
-        return videoGenerationService.findLatestByCategory(category, userId, modelId);
+        return videoGenerationService.findLatestByCategoryFamily(category, userId, modelId);
+    }
+
+    private VideoTask findActiveStoryboardVideoTask(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return null;
+        }
+        return videoGenerationService.findLatestActiveByCategoryFamily(category, userId, modelId);
+    }
+
+    private boolean shouldUseExistingTask(VideoTask existingTask, boolean forceRegenerate, String idempotencyCategory) {
+        if (existingTask == null) {
+            return false;
+        }
+        if (isActiveVideoTask(existingTask)) {
+            return true;
+        }
+        if (forceRegenerate && isRequestScopedCategory(idempotencyCategory)
+                && Objects.equals(existingTask.getCategory(), idempotencyCategory)) {
+            return true;
+        }
+        return !forceRegenerate;
+    }
+
+    private boolean isActiveVideoTask(VideoTask task) {
+        return task != null && task.getStatus() != null && (task.getStatus() == 0 || task.getStatus() == 1);
     }
 
     private String handleExistingVideoTask(VideoTask existingTask, String prompt, long timeoutMs)
             throws InterruptedException {
-        if ((existingTask.getStatus() != null && existingTask.getStatus() == 0)
-                || (existingTask.getStatus() != null && existingTask.getStatus() == 1)) {
+        if (isActiveVideoTask(existingTask)) {
             try {
                 VideoTask completed = videoGenerationConsumer.waitForTask(existingTask.getTaskId(), timeoutMs);
                 return resultFromCompletedTask(completed, prompt);
@@ -437,6 +485,33 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     private String storyboardItemCategory(Long storyboardItemId) {
         return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
+    }
+
+    private String resolveIdempotencyCategory(String storyboardCategory, boolean forceRegenerate,
+            String generationRequestId) {
+        if (StrUtil.isBlank(storyboardCategory)) {
+            return null;
+        }
+        String normalizedRequestId = sanitizeGenerationRequestId(generationRequestId);
+        if (forceRegenerate && StrUtil.isNotBlank(normalizedRequestId)) {
+            return storyboardCategory + ":request:" + normalizedRequestId;
+        }
+        return storyboardCategory;
+    }
+
+    private String sanitizeGenerationRequestId(String requestId) {
+        if (StrUtil.isBlank(requestId)) {
+            return null;
+        }
+        String sanitized = requestId.trim().replaceAll("[^A-Za-z0-9_-]", "");
+        if (StrUtil.isBlank(sanitized)) {
+            return null;
+        }
+        return sanitized.length() > 80 ? sanitized.substring(0, 80) : sanitized;
+    }
+
+    private boolean isRequestScopedCategory(String category) {
+        return StrUtil.isNotBlank(category) && category.contains(":request:");
     }
 
     private StoryboardFrameInputs resolveStoryboardFrameInputs(Long storyboardItemId) {
