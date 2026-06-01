@@ -1,7 +1,5 @@
 FROM eclipse-temurin:21-jre
 
-LABEL maintainer="Stonewu <https://github.com/Stonewuu>"
-
 WORKDIR /app
 
 RUN set -eux; \

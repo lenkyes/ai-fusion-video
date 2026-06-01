@@ -4,12 +4,6 @@
   "private": true,
   "description": "Web application for the AI-driven video creation platform",
   "license": "MIT",
-  "homepage": "https://github.com/Stonewuu/ai-fusion-video",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Stonewuu/ai-fusion-video.git",
-    "directory": "ai-fusion-video-web"
-  },
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "next dev",

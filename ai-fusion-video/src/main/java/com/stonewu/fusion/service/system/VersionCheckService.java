@@ -35,14 +35,12 @@ import java.util.regex.Pattern;
 @Slf4j
 public class VersionCheckService {
 
-    private static final String RELEASES_API_URL =
-            "https://api.github.com/repos/Stonewuu/ai-fusion-video/releases?per_page=10";
-    private static final String RELEASES_PAGE_URL =
-            "https://github.com/Stonewuu/ai-fusion-video/releases";
+    private static final String RELEASES_API_URL = System.getenv("AI_FUSION_RELEASES_API_URL");
+    private static final String RELEASES_PAGE_URL = System.getenv("AI_FUSION_RELEASES_PAGE_URL");
     private static final String DOCKER_HUB_TAG_API_TEMPLATE =
             "https://hub.docker.com/v2/repositories/%s/tags/%s";
-    private static final String BACKEND_IMAGE_REPOSITORY = "stonewuu/ai-fusion-video";
-    private static final String FRONTEND_IMAGE_REPOSITORY = "stonewuu/ai-fusion-video-web";
+    private static final String BACKEND_IMAGE_REPOSITORY = System.getenv("AI_FUSION_BACKEND_IMAGE_REPOSITORY");
+    private static final String FRONTEND_IMAGE_REPOSITORY = System.getenv("AI_FUSION_FRONTEND_IMAGE_REPOSITORY");
     private static final Duration CACHE_TTL = Duration.ofHours(6);
     private static final Pattern SEMVER_PATTERN = Pattern.compile("(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -104,7 +102,7 @@ public class VersionCheckService {
         respVO.setLatestVersionDisplay(displayVersion(deployableRelease != null ? deployableRelease.version() : null));
         respVO.setLatestReleaseVersion(latestRelease != null ? latestRelease.version() : null);
         respVO.setLatestReleaseVersionDisplay(displayVersion(latestRelease != null ? latestRelease.version() : null));
-        respVO.setLatestReleaseUrl(latestRelease != null ? latestRelease.releaseUrl() : RELEASES_PAGE_URL);
+        respVO.setLatestReleaseUrl(latestRelease != null ? latestRelease.releaseUrl() : null);
         respVO.setLatestReleasePublishedAt(latestRelease != null ? latestRelease.publishedAt() : null);
         respVO.setLatestReleaseDockerReady(latestRelease != null && latestRelease.dockerReady());
         respVO.setUpdateAvailable("behind".equals(versionRelation));
@@ -112,11 +110,11 @@ public class VersionCheckService {
         respVO.setDevelopmentBuild(runtimeVersionInfo.developmentBuild());
         respVO.setBuildProfile(runtimeVersionInfo.buildProfile());
         respVO.setVersionRelation(versionRelation);
-        respVO.setReleaseUrl(deployableRelease != null ? deployableRelease.releaseUrl() : RELEASES_PAGE_URL);
-        respVO.setTagUrl(deployableRelease != null ? deployableRelease.tagUrl() : RELEASES_PAGE_URL);
+        respVO.setReleaseUrl(deployableRelease != null ? deployableRelease.releaseUrl() : null);
+        respVO.setTagUrl(deployableRelease != null ? deployableRelease.tagUrl() : null);
         respVO.setPublishedAt(deployableRelease != null ? deployableRelease.publishedAt() : null);
         respVO.setCheckedAt(latest.checkedAt().toString());
-        respVO.setSource("github-release+docker-hub");
+        respVO.setSource("release+docker-hub");
         respVO.setCheckSucceeded(latest.checkSucceeded());
         respVO.setMessage(resolveMessage(runtimeVersionInfo, latest, versionRelation));
         return respVO;
@@ -185,22 +183,25 @@ public class VersionCheckService {
     }
 
     private CachedVersionInfo fetchLatestVersionInfo() {
+        if (!hasText(RELEASES_API_URL)) {
+            return CachedVersionInfo.failure("版本更新检查未配置发布源");
+        }
+
         Request request = new Request.Builder()
                 .url(RELEASES_API_URL)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("Accept", "application/json")
                 .header("User-Agent", "ai-fusion-video-version-check")
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                String message = "GitHub 版本检查失败: HTTP " + response.code();
+                String message = "版本检查失败: HTTP " + response.code();
                 log.warn("[VersionCheck] {}", message);
                 return CachedVersionInfo.failure(message);
             }
 
             if (response.body() == null) {
-                String message = "GitHub 版本检查失败: 响应体为空";
+                String message = "版本检查失败: 响应体为空";
                 log.warn("[VersionCheck] {}", message);
                 return CachedVersionInfo.failure(message);
             }
@@ -208,7 +209,7 @@ public class VersionCheckService {
             String body = response.body().string();
             JsonNode root = OBJECT_MAPPER.readTree(body);
             if (!root.isArray() || root.isEmpty()) {
-                String message = "GitHub 版本检查失败: 未找到可用 release";
+                String message = "版本检查失败: 未找到可用 release";
                 log.warn("[VersionCheck] {}", message);
                 return CachedVersionInfo.failure(message);
             }
@@ -247,7 +248,7 @@ public class VersionCheckService {
             }
 
             if (latestRelease == null) {
-                String message = "GitHub 版本检查失败: 未找到正式 release";
+                String message = "版本检查失败: 未找到正式 release";
                 log.warn("[VersionCheck] {}", message);
                 return CachedVersionInfo.failure(message);
             }
@@ -270,13 +271,16 @@ public class VersionCheckService {
 
             return CachedVersionInfo.success(latestRelease, deployableRelease, message);
         } catch (IOException e) {
-            String message = "GitHub 版本检查失败: " + e.getMessage();
+            String message = "版本检查失败: " + e.getMessage();
             log.warn("[VersionCheck] {}", message);
             return CachedVersionInfo.failure(message);
         }
     }
 
     private boolean areDockerImagesReady(String version) {
+        if (!hasText(BACKEND_IMAGE_REPOSITORY) || !hasText(FRONTEND_IMAGE_REPOSITORY)) {
+            return false;
+        }
         return dockerTagExists(BACKEND_IMAGE_REPOSITORY, version)
                 && dockerTagExists(FRONTEND_IMAGE_REPOSITORY, version);
     }
@@ -399,10 +403,10 @@ public class VersionCheckService {
     }
 
     private String buildTagUrl(String tagName) {
-        if (!hasText(tagName)) {
-            return RELEASES_PAGE_URL;
+        if (!hasText(tagName) || !hasText(RELEASES_PAGE_URL)) {
+            return null;
         }
-        return "https://github.com/Stonewuu/ai-fusion-video/releases/tag/v" + sanitizeVersion(tagName);
+        return RELEASES_PAGE_URL.replaceAll("/+$", "") + "/tag/v" + sanitizeVersion(tagName);
     }
 
     private String textOrNull(JsonNode node, String fieldName) {

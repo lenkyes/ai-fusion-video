@@ -4,10 +4,6 @@
 <p align="center">
   <strong>星拓，基于 Agent 的智能视频创作平台</strong>
 </p>
-<p align="center">
-  <img src="https://img.shields.io/github/v/release/Stonewuu/ai-fusion-video?display_name=tag" alt="version" />
-</p>
-
 <table align="center" style="margin: 0 auto; display: table;">
   <tr>
     <td align="center">
@@ -47,7 +43,7 @@
 - **🎥 AI 视频生成** — 基于分镜描述和参考图生成视频片段
 - **📦 素材管理** — 统一管理项目内的图片、视频等素材资源
 - **🤖 多模型支持** — 集成 OpenAI、Claude、Gemini、通义千问、DeepSeek、Ollama 等主流大模型
-- **⬆️ 版本更新检查** — 在系统设置中检测 GitHub Release 新版本并给出升级指引
+- **⬆️ 版本更新检查** — 在系统设置中检测新版本并给出升级指引
 
 https://github.com/user-attachments/assets/fe71cbb8-f9d9-4351-9a4c-cb8a0a6af7ba
 
@@ -92,7 +88,7 @@ https://github.com/user-attachments/assets/be99d4c1-dc09-4616-8fba-06cb959c84c8
 
 ```bash
 # 克隆项目
-git clone https://github.com/Stonewuu/ai-fusion-video.git
+git clone <your-repository-url>
 cd ai-fusion-video
 
 # 可选：复制并修改环境变量
@@ -172,10 +168,6 @@ AI 模型可在系统设置页面动态管理，支持以下提供商：
 
 ---
 
-## ⭐ Star 趋势
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Stonewuu/ai-fusion-video&type=Date)](https://star-history.com/#Stonewuu/ai-fusion-video&Date)
-
 ## 🙏 致谢
 
 - 感谢 [LinuxDo](https://linux.do) 论坛的支持
@@ -188,5 +180,5 @@ AI 模型可在系统设置页面动态管理，支持以下提供商：
 ---
 
 <p align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/Stonewuu">Stonewu</a></sub>
+  <sub>Built with ❤️ by Stonewu</sub>
 </p>

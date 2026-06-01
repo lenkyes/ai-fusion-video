@@ -16,7 +16,7 @@ export interface SystemVersionInfo {
   latestVersionDisplay: string;
   latestReleaseVersion: string | null;
   latestReleaseVersionDisplay: string;
-  latestReleaseUrl: string;
+  latestReleaseUrl: string | null;
   latestReleasePublishedAt: string | null;
   latestReleaseDockerReady: boolean;
   updateAvailable: boolean;
@@ -24,8 +24,8 @@ export interface SystemVersionInfo {
   developmentBuild: boolean;
   buildProfile: string;
   versionRelation: "behind" | "same" | "ahead" | "incomparable";
-  releaseUrl: string;
-  tagUrl: string;
+  releaseUrl: string | null;
+  tagUrl: string | null;
   publishedAt: string | null;
   checkedAt: string;
   source: string;

@@ -14,7 +14,6 @@
 	<version>0.6.0</version>
 	<name>ai-fusion-video</name>
 	<description>AI-driven video creation platform</description>
-	<url>https://github.com/Stonewuu/ai-fusion-video</url>
 	<licenses>
 		<license>
 			<name>MIT License</name>
@@ -22,19 +21,6 @@
 			<distribution>repo</distribution>
 		</license>
 	</licenses>
-	<developers>
-		<developer>
-			<id>Stonewuu</id>
-			<name>Stonewu</name>
-			<url>https://github.com/Stonewuu</url>
-		</developer>
-	</developers>
-	<scm>
-		<connection>scm:git:https://github.com/Stonewuu/ai-fusion-video.git</connection>
-		<developerConnection>scm:git:ssh://git@github.com/Stonewuu/ai-fusion-video.git</developerConnection>
-		<tag>0.6.0</tag>
-		<url>https://github.com/Stonewuu/ai-fusion-video</url>
-	</scm>
 	<properties>
 		<java.version>21</java.version>
 		<mapstruct.version>1.6.3</mapstruct.version>

@@ -7,7 +7,6 @@ import {
   Loader2,
   AlertTriangle,
   RefreshCw,
-  ExternalLink,
   Download,
   Mail,
 } from "lucide-react";
@@ -635,7 +634,7 @@ export default function GeneralSettingsPage() {
                 </span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                通过 GitHub Release 检查当前运行版本与最新发布版本，便于管理员决定是否升级部署。
+                检查当前运行版本与最新发布版本，便于管理员决定是否升级部署。
               </p>
             </div>
 
@@ -683,7 +682,7 @@ export default function GeneralSettingsPage() {
           {versionInfo?.latestReleaseVersion ? (
             <div className="mt-4 rounded-xl border border-border/20 bg-muted/10 p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs text-muted-foreground">GitHub 最新 Release</p>
+                <p className="text-xs text-muted-foreground">最新发布版本</p>
                 <span
                   className={cn(
                     "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium border",
@@ -744,28 +743,6 @@ export default function GeneralSettingsPage() {
                   </button>
                 )
               ) : null}
-
-              <a
-                href={versionInfo?.latestReleaseUrl || "https://github.com/Stonewuu/ai-fusion-video/releases"}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl border border-border/30 bg-background/80 px-4 py-2 text-sm font-medium transition-colors hover:bg-muted/20"
-              >
-                <ExternalLink className="h-4 w-4" />
-                查看最新 Release
-              </a>
-
-              {versionInfo?.latestVersion ? (
-                <a
-                  href={versionInfo?.tagUrl || "https://github.com/Stonewuu/ai-fusion-video/releases"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-xl border border-border/30 bg-background/80 px-4 py-2 text-sm font-medium transition-colors hover:bg-muted/20"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  查看可部署版本
-                </a>
-              ) : null}
             </div>
 
             {hasUpdate ? (
@@ -790,7 +767,7 @@ cd ai-fusion-video
             ) : null}
 
             <p className="mt-4 text-xs text-muted-foreground leading-relaxed">
-              版本源：GitHub Release。当前接口会缓存检查结果，点击“检查更新”可立即强制刷新。
+              当前接口会缓存检查结果，点击“检查更新”可立即强制刷新。
             </p>
           </div>
           </motion.div>

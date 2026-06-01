@@ -21,8 +21,6 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw package -DskipTests -B
 # ---------- 阶段 2: 运行 ----------
 FROM eclipse-temurin:21-jre
 
-LABEL maintainer="Stonewu <https://github.com/Stonewuu>"
-
 WORKDIR /app
 
 RUN set -eux; \

@@ -20,19 +20,19 @@ public class VersionInfoRespVO {
     /** 最新版本展示文案 */
     private String latestVersionDisplay;
 
-    /** GitHub 最新 release 版本 */
+    /** 最新 release 版本 */
     private String latestReleaseVersion;
 
-    /** GitHub 最新 release 展示文案 */
+    /** 最新 release 展示文案 */
     private String latestReleaseVersionDisplay;
 
-    /** GitHub 最新 release 链接 */
+    /** 最新 release 链接 */
     private String latestReleaseUrl;
 
-    /** GitHub 最新 release 发布时间（ISO-8601） */
+    /** 最新 release 发布时间（ISO-8601） */
     private String latestReleasePublishedAt;
 
-    /** GitHub 最新 release 的 Docker 镜像是否已就绪 */
+    /** 最新 release 的 Docker 镜像是否已就绪 */
     private Boolean latestReleaseDockerReady;
 
     /** 是否有新版本可升级 */
