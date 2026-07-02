@@ -31,7 +31,7 @@ public class AssetItem extends BaseEntity {
     /** 所属主资产ID */
     private Long assetId;
 
-    /** 子资产类型：front-正面 / side-侧面 / back-背面 / detail-细节 / expression-表情 / pose-姿势 / variant-变体 / original-原始 */
+    /** 子资产类型：initial-初始图 / three_view-角色三视图 / variant-变体 / costume-服装变化 / age-年龄变化 / damaged-损坏状态等 */
     private String itemType;
 
     /** 子资产名称 */

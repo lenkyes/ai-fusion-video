@@ -71,7 +71,7 @@ public class AssetItemAddToolExecutor implements ToolExecutor {
                         },
                         "itemType": {
                             "type": "string",
-                            "description": "子资产类型（可选），可用值：front(正面)、side(侧面)、back(背面)、detail(细节)、expression(表情)、pose(姿势)、variant(变体)、original(原始)。默认为 original"
+                            "description": "子资产类型（可选），可用值：initial(初始图)、three_view(角色三视图)、variant(变体)、costume(服装变化)、age(年龄变化)、damaged(损坏状态)、detail(细节)。默认为 initial"
                         },
                         "name": {
                             "type": "string",

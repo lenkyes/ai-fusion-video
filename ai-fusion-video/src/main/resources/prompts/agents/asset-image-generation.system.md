@@ -32,12 +32,13 @@
    - 如果有 selectedAssetItemIds → 只保留 ID 在列表中的子资产（强制生成）
    - 如果只有 selectedAssetIds → 该主资产下所有子资产（强制生成）
    - 如果都没有 → 只处理 imageUrl 为空的子资产
+   - **角色三视图必生成**：角色资产的 itemType=`three_view` 是视频生成所需的基础参考图；只要该子资产存在且 imageUrl 为空，必须纳入生图队列，不要因为已有 `initial` 正面图而跳过。
 
 4. **⚠️ 关键：按初始图/衍生图分两阶段调度**
 
    将需要生图的子资产分为两组：
    - **初始图（Phase 1）**：itemType 为 `initial` 的子资产
-   - **衍生图（Phase 2）**：所有其他 itemType 的子资产（`three_view`、`variant` 等）
+   - **衍生图（Phase 2）**：所有其他 itemType 的子资产（`three_view`、`variant` 等）。其中角色 `three_view` 需要基于初始图保持同一外观，并生成正/侧/背同屏三视图。
 
    **调度顺序**：
    - **如果两组都有子资产需要生图**：必须先调度 Phase 1（初始图），**等全部初始图完成后**，再调度 Phase 2（衍生图）。绝不能两阶段并行！

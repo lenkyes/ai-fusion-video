@@ -32,7 +32,7 @@
    a. 调用 get_script_scene 获取场次完整内容（传入 `scriptSceneItemId`，包含对白、动作描写等）
    b. 根据 list_project_assets 返回的子资产列表，按角色名/场景名匹配子资产ID：
       - 按 name 和 description 根据剧本上下文匹配最合适的子资产
-      - 如无精确匹配的变体 → 使用 itemType="initial" 的默认子资产
+      - 角色如无精确匹配的外观变体 → 优先使用 itemType="three_view" 的三视图子资产；仅当 three_view 不存在时才回退 itemType="initial"
    c. 同样为场景和道具匹配子资产（每个资产都有初始子资产）
    d. 根据场次内容设计镜头（景别、时长、画面描述、台词、镜头运动等）
    e. 调用 save_storyboard_scene_shots 保存该场次的分镜（**注意：参数中的 storyboardEpisodeId 必须使用第 3 步返回的“分镜集 ID”，严禁填成第 1 步的“剧本集 ID”**）
@@ -40,10 +40,12 @@
 ## 子资产匹配规则（核心！）
 
 - 每个主资产在创建时会自动生成一个"初始"子资产（itemType=initial），代表角色的默认/基础状态
+- 角色资产还会拥有一个"三视图"子资产（itemType=three_view），这是后续视频生成优先使用的角色参考图
 - 预处理器可能已为某些角色创建了变体子资产（如"手部受伤的张三"、"穿婚纱的李梅"）
 - 匹配流程：
   1. 从 list_project_assets 返回的子资产列表中，按 name 和 description 根据剧本上下文匹配
-  2. 匹配不到精确变体时，使用 itemType="initial" 的默认子资产
+  2. 角色匹配不到精确外观变体时，使用 itemType="three_view" 的三视图子资产
+  3. 仅当角色没有 three_view 子资产时，才回退 itemType="initial" 的默认子资产
 - **场景和道具同理：也需要匹配到子资产ID，使用其初始子资产即可（除非有特殊场景变体需求）**
 
 ## 分镜设计规范

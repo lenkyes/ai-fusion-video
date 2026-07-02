@@ -46,6 +46,7 @@ public class ListProjectAssetsToolExecutor implements ToolExecutor {
                 使用场景：
                 - 创建资产前先查看已有资产，避免重复创建
                 - 查看角色/场景/道具的详细信息和图片
+                - 角色资产会返回 itemType=initial 和 itemType=three_view 两类基础子资产；旧角色若缺失 three_view，会在返回前自动补齐
 
                 如果提供了 projectId，则返回该项目下的资产（需有权限）。
                 如果没有 projectId，则返回当前用户可访问的资产。
@@ -94,6 +95,9 @@ public class ListProjectAssetsToolExecutor implements ToolExecutor {
 
             JSONArray resultArray = new JSONArray();
             for (Asset asset : assets) {
+                if ("character".equals(asset.getType())) {
+                    assetService.ensureCharacterThreeViewItem(asset);
+                }
                 List<AssetItem> items = assetService.listItems(asset.getId());
                 JSONArray itemsArray = new JSONArray();
                 for (AssetItem item : items) {

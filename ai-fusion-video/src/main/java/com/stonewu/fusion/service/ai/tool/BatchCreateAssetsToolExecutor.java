@@ -59,6 +59,7 @@ public class BatchCreateAssetsToolExecutor implements ToolExecutor {
                         - 单次最多创建 %d 个资产，超出请分次调用
                         - assets 数组中每项必须包含 type 和 name
                         - 支持的资产类型：character（角色）、scene（场景）、prop（道具）
+                        - 角色资产会自动拥有 `initial`（默认正面设定图）和 `three_view`（正/侧/背三视图）两个基础子资产；复用已有角色时也会补齐缺失的 `three_view`
                         - properties 必须包含 query_asset_metadata 返回的**所有** fieldKey，每个 key 都必须填写，确实无法确定的填'无'。填写内容严格遵循对应 fieldDescription 中的要求
                         - 每个资产必须提供 initialItem 填充初始子资产的 name 和 properties（properties 同样须包含所有 fieldKey，无值填'无'）
 
@@ -141,7 +142,7 @@ public class BatchCreateAssetsToolExecutor implements ToolExecutor {
                                                 "description": "初始子资产内容（必填），用于填充自动创建的初始子资产。name 填写具体有意义的名称（如角色名、场景名等）",
                                                 "properties": {
                                                     "name": { "type": "string", "description": "子资产名称，应使用具体有意义的名称（如'张三'、'桌子'等）" },
-                                                    "itemType": { "type": "string" },
+                                                    "itemType": { "type": "string", "description": "初始子资产请保持 initial；角色 three_view 会由系统自动创建" },
                                                     "imageUrl": { "type": "string" },
                                                     "properties": {
                                                         "type": "object",
@@ -204,6 +205,9 @@ public class BatchCreateAssetsToolExecutor implements ToolExecutor {
                 // 去重检查
                 Asset found = assetService.findByProjectTypeAndName(projectId, type, name);
                 if (found != null) {
+                    if ("character".equals(found.getType())) {
+                        assetService.ensureCharacterThreeViewItem(found);
+                    }
                     existing.add(JSONUtil.createObj()
                             .set("type", type).set("name", name).set("assetId", found.getId()));
                 } else {
@@ -235,6 +239,9 @@ public class BatchCreateAssetsToolExecutor implements ToolExecutor {
                                 first.setProperties(initialItemData.getJSONObject("properties").toString());
                             assetService.updateItem(first);
                         }
+                    }
+                    if ("character".equals(saved.getType())) {
+                        assetService.ensureCharacterThreeViewItem(saved);
                     }
 
                     created.add(JSONUtil.createObj()

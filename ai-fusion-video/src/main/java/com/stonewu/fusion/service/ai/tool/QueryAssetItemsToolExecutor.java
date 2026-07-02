@@ -54,6 +54,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
 
                 **复用判断原则**：
                 - 每个主资产创建时会自动生成一个初始子资产（默认变体），图片挂在子资产上
+                - 角色资产还会自动拥有 itemType=three_view 的三视图子资产；查询旧角色资产时若缺失会自动补齐，供后续生图生成正面/侧面/背面三视图
                 - 子资产代表外观上有显著变化的变体（如受伤、换装、年龄变化、场景损毁等）
                 - 如果剧本描述的只是表情变化（微笑、愤怒）、心理状态（紧张、兴奋）、
                   简单动作（奔跑、坐下），则直接复用初始子资产即可，无需查找或创建新子资产
@@ -65,7 +66,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                 2. 按 assetId 精确查询单个
                 3. 按 assetName + projectId 模糊匹配主资产名称
 
-                返回每个资产的子资产列表，包含 id、name、description、itemType、imageUrl、thumbnailUrl。
+                返回每个资产的子资产列表，包含 id、name、itemType、imageUrl、thumbnailUrl、properties。
                 """;
     }
 
@@ -158,6 +159,9 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                     continue;
                 }
 
+                if ("character".equals(asset.getType())) {
+                    assetService.ensureCharacterThreeViewItem(asset);
+                }
                 List<AssetItem> items = assetService.listItems(asset.getId());
                 results.add(buildAssetResult(asset, items));
             } catch (Exception e) {
@@ -210,6 +214,9 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                     .set("message", "未找到匹配的资产。请提供 assetId 或 assetName + projectId").toString();
         }
 
+        if ("character".equals(asset.getType())) {
+            assetService.ensureCharacterThreeViewItem(asset);
+        }
         List<AssetItem> items = assetService.listItems(asset.getId());
         return buildAssetResult(asset, items).toString();
     }

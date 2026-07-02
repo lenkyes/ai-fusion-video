@@ -6,10 +6,10 @@
 2. **查询画风**：调用 `get_project(projectId)`，从 `artStyleInfo` 字段获取：
    - `description`（画风描述）、`imagePrompt`（画风提示词，空则默认：`高质量精细画面，专业级插画，细节丰富`）、`referenceImageUrl`（风格参考图URL）。若 `hasArtStyle` 为 false，使用默认通用写实风。
 3. **查询子资产**：调用 `query_asset_items`。**必须且仅能使用 `assetId` 数字参数**，⚠️ **禁止使用 assetName 查询**。
-4. **定位目标**：匹配 `itemId` 确定 `itemType`（initial, three_view, variant）及资产信息（assetName, assetType, assetDescription 等）。
+4. **定位目标**：匹配 `itemId` 确定 `itemType`（initial, three_view, variant 等）及资产信息（assetName, assetType, assetDescription 等）。
 5. **获取初始图（衍生图）**：若 itemType 不是 `initial`，在 items 中定位 `itemType` 为 `initial` 的子资产并提取其 `imageUrl`。
 6. **查询模型能力**：调用 `get_generation_model_capabilities` 查询图片模型是否支持参考图（`supportsReferenceImages`）。
-7. **生图**：结合画风、参考图及资产描述编排中文 Prompt，调用 `generate_image` 生成**一张**图片。
+7. **生图**：结合画风、参考图及资产描述编排中文 Prompt，调用 `generate_image` 生成**一张**图片；若为 `three_view`，这一张必须是正面/侧面/背面同屏的横向三视图设定图。
 8. **更新**：调用 `update_asset_image` 保存图片，用一句简洁的中文总结。
 
 ## 2. 参考图编排与降级规则
@@ -36,12 +36,12 @@
 ### B. 主体类型声明
 在画风和图片引用之后，**必须紧跟一句明确的主体类型声明**：
 - 角色：`一个角色设定图，` | 场景：`一个场景概念图，` | 道具：`一个道具设定图，`
-- 三视图：`一张角色设定概念三视图，采用横向宽画幅，画面等分为四等份，最左边是角色面部肖像特写，右边三个为角色正面、侧面、背面全身设定图，`
+- 三视图：`一张角色设定三视图，采用横向宽画幅，画面严格分为三栏，左栏为角色正面全身，中栏为同一角色侧面全身，右栏为同一角色背面全身，三栏身高比例一致、服装和发型完全一致，`
 
 ### C. 视角与细节规范
-- **角色类 (initial / variant)**：标准站姿正面，双臂下垂或微张，**禁止描述表情、情绪或动作**，呈现自然中性。必须详述身材比例（如：卡通大头身1:2；写实人体1:7.5；日漫修长1:6等）以及发型、服装五官细节。
+- **角色类 (initial / 普通 variant)**：标准站姿正面，双臂下垂或微张，**禁止描述表情、情绪或动作**，呈现自然中性。必须详述身材比例（如：卡通大头身1:2；写实人体1:7.5；日漫修长1:6等）以及发型、服装五官细节。
 - **道具类**：突出材质纹理、造型细节、比例尺寸、光泽质感。
-- **三视图 (three_view)**：画面等分四份（最左面部特写，右侧正、侧、背全身），纯白背景（`pure solid white background, isolated on white background`）。
+- **三视图 (three_view)**：仅角色资产使用。必须是横向三栏正/侧/背全身，不要面部特写栏，不要单人正面立绘，不要三位不同角色。调用 `generate_image` 时优先设置宽大于高的尺寸（如 width=1536, height=1024；如模型不适配则用最接近的横向尺寸）。纯白背景（`pure solid white background, isolated on white background`）。
 
 ## 4. 结构示例与约束
 

@@ -31,6 +31,9 @@ import java.util.stream.Collectors;
 public class AssetService {
 
     private static final int OWNER_TYPE_TEAM = 2;
+    private static final String ASSET_TYPE_CHARACTER = "character";
+    private static final String ITEM_TYPE_INITIAL = "initial";
+    private static final String ITEM_TYPE_THREE_VIEW = "three_view";
 
     private final AssetMapper assetMapper;
     private final AssetItemMapper assetItemMapper;
@@ -215,17 +218,40 @@ public class AssetService {
         applyCurrentTeamOwnership(asset);
         assetMapper.insert(asset);
 
-        // 自动创建初始子资产，名称使用主资产名称
-        AssetItem initialItem = AssetItem.builder()
-                .assetId(asset.getId())
-                .itemType("initial")
-                .name(asset.getName())
-                .sortOrder(0)
-                .sourceType(asset.getSourceType() != null ? asset.getSourceType() : 1)
-                .build();
+        AssetItem initialItem = buildInitialItem(asset);
         assetItemMapper.insert(initialItem);
+        if (isCharacterAsset(asset)) {
+            assetItemMapper.insert(buildCharacterThreeViewItem(asset, 1, asset.getProperties()));
+        }
 
         return asset;
+    }
+
+    @CacheEvict(value = { "assetItem", "asset" }, allEntries = true)
+    @Transactional
+    public AssetItem ensureCharacterThreeViewItem(Asset asset) {
+        if (!isCharacterAsset(asset) || asset.getId() == null) {
+            return null;
+        }
+
+        List<AssetItem> items = listItems(asset.getId());
+        AssetItem existingThreeView = items.stream()
+                .filter(item -> ITEM_TYPE_THREE_VIEW.equals(item.getItemType()))
+                .findFirst()
+                .orElse(null);
+        if (existingThreeView != null) {
+            String properties = resolveThreeViewProperties(asset, items);
+            if (StrUtil.isBlank(existingThreeView.getProperties()) && StrUtil.isNotBlank(properties)) {
+                existingThreeView.setProperties(properties);
+                assetItemMapper.updateById(existingThreeView);
+            }
+            return existingThreeView;
+        }
+
+        String properties = resolveThreeViewProperties(asset, items);
+        AssetItem threeViewItem = buildCharacterThreeViewItem(asset, nextSortOrder(items), properties);
+        assetItemMapper.insert(threeViewItem);
+        return threeViewItem;
     }
 
     @CacheEvict(value = "asset", allEntries = true)
@@ -326,6 +352,57 @@ public class AssetService {
         TeamService.OwnerScope ownerScope = teamService.getRequiredCurrentOwnerScopeByUser(creatorUserId);
         asset.setOwnerType(ownerScope.getOwnerType());
         asset.setOwnerId(ownerScope.getOwnerId());
+    }
+
+    private AssetItem buildInitialItem(Asset asset) {
+        return AssetItem.builder()
+                .assetId(asset.getId())
+                .itemType(ITEM_TYPE_INITIAL)
+                .name(asset.getName())
+                .sortOrder(0)
+                .sourceType(assetSourceType(asset))
+                .build();
+    }
+
+    private AssetItem buildCharacterThreeViewItem(Asset asset, int sortOrder, String properties) {
+        return AssetItem.builder()
+                .assetId(asset.getId())
+                .itemType(ITEM_TYPE_THREE_VIEW)
+                .name(threeViewItemName(asset.getName()))
+                .sortOrder(sortOrder)
+                .sourceType(assetSourceType(asset))
+                .properties(properties)
+                .build();
+    }
+
+    private boolean isCharacterAsset(Asset asset) {
+        return asset != null && ASSET_TYPE_CHARACTER.equals(asset.getType());
+    }
+
+    private int assetSourceType(Asset asset) {
+        return asset.getSourceType() != null ? asset.getSourceType() : 1;
+    }
+
+    private String threeViewItemName(String assetName) {
+        return StrUtil.blankToDefault(assetName, "角色") + " 三视图";
+    }
+
+    private String resolveThreeViewProperties(Asset asset, List<AssetItem> items) {
+        return items.stream()
+                .filter(item -> ITEM_TYPE_INITIAL.equals(item.getItemType()))
+                .map(AssetItem::getProperties)
+                .filter(StrUtil::isNotBlank)
+                .findFirst()
+                .orElse(asset.getProperties());
+    }
+
+    private int nextSortOrder(List<AssetItem> items) {
+        return items.stream()
+                .map(AssetItem::getSortOrder)
+                .filter(order -> order != null)
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(0) + 1;
     }
 
     /**

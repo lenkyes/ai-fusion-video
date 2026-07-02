@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +94,84 @@ class AssetServiceTests {
                 assertThat(assetCaptor.getValue().getOwnerType()).isEqualTo(2);
                 assertThat(assetCaptor.getValue().getOwnerId()).isEqualTo(5L);
                 assertThat(assetCaptor.getValue().getUserId()).isEqualTo(9L);
+        }
+
+        @Test
+        void createCharacterCreatesInitialAndThreeViewItems() {
+                doAnswer(invocation -> {
+                        Asset saved = invocation.getArgument(0);
+                        saved.setId(21L);
+                        return 1;
+                }).when(assetMapper).insert(any(Asset.class));
+
+                Asset asset = Asset.builder()
+                                .projectId(1L)
+                                .type("character")
+                                .name("张三")
+                                .properties("{\"appearance\":\"黑发短发\"}")
+                                .sourceType(2)
+                                .build();
+
+                assetService.create(asset);
+
+                ArgumentCaptor<AssetItem> itemCaptor = ArgumentCaptor.forClass(AssetItem.class);
+                verify(assetItemMapper, times(2)).insert(itemCaptor.capture());
+                assertThat(itemCaptor.getAllValues())
+                                .extracting(AssetItem::getItemType)
+                                .containsExactly("initial", "three_view");
+                assertThat(itemCaptor.getAllValues().get(1).getName()).isEqualTo("张三 三视图");
+                assertThat(itemCaptor.getAllValues().get(1).getProperties()).isEqualTo("{\"appearance\":\"黑发短发\"}");
+                assertThat(itemCaptor.getAllValues().get(1).getSortOrder()).isEqualTo(1);
+        }
+
+        @Test
+        void createSceneCreatesOnlyInitialItem() {
+                doAnswer(invocation -> {
+                        Asset saved = invocation.getArgument(0);
+                        saved.setId(22L);
+                        return 1;
+                }).when(assetMapper).insert(any(Asset.class));
+
+                Asset asset = Asset.builder()
+                                .projectId(1L)
+                                .type("scene")
+                                .name("咖啡厅")
+                                .sourceType(2)
+                                .build();
+
+                assetService.create(asset);
+
+                ArgumentCaptor<AssetItem> itemCaptor = ArgumentCaptor.forClass(AssetItem.class);
+                verify(assetItemMapper).insert(itemCaptor.capture());
+                assertThat(itemCaptor.getValue().getItemType()).isEqualTo("initial");
+        }
+
+        @Test
+        void ensureCharacterThreeViewItemCreatesMissingItemFromInitialProperties() {
+                when(assetItemMapper.selectList(any())).thenReturn(java.util.List.of(
+                                AssetItem.builder()
+                                                .assetId(31L)
+                                                .itemType("initial")
+                                                .properties("{\"appearance\":\"白发蓝衣\"}")
+                                                .sortOrder(0)
+                                                .build()));
+
+                Asset asset = Asset.builder()
+                                .id(31L)
+                                .type("character")
+                                .name("李四")
+                                .properties("{\"appearance\":\"主资产属性\"}")
+                                .sourceType(2)
+                                .build();
+
+                assetService.ensureCharacterThreeViewItem(asset);
+
+                ArgumentCaptor<AssetItem> itemCaptor = ArgumentCaptor.forClass(AssetItem.class);
+                verify(assetItemMapper).insert(itemCaptor.capture());
+                assertThat(itemCaptor.getValue().getItemType()).isEqualTo("three_view");
+                assertThat(itemCaptor.getValue().getName()).isEqualTo("李四 三视图");
+                assertThat(itemCaptor.getValue().getProperties()).isEqualTo("{\"appearance\":\"白发蓝衣\"}");
+                assertThat(itemCaptor.getValue().getSortOrder()).isEqualTo(1);
         }
 
     @Test
