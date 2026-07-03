@@ -1,4 +1,5 @@
 import { http, API_BASE_URL } from "./client";
+import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
 
 // ========== 类型定义 ==========
 
@@ -149,7 +150,7 @@ async function refreshTokenForSSE(): Promise<string | null> {
     localStorage.setItem("auth-storage", JSON.stringify(parsed));
 
     // 同步 cookie
-    document.cookie = `auth-token=${accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+    setAuthCookie(accessToken, result.data.expiresIn);
 
     // 尝试更新 zustand store
     try {
@@ -194,7 +195,7 @@ export async function authenticatedFetch(
     // 刷新失败 → 清除状态跳转登录页
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth-storage");
-      document.cookie = "auth-token=; path=/; max-age=0";
+      clearAuthCookie();
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }

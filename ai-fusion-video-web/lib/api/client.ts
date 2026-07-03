@@ -1,4 +1,5 @@
 import axios from "axios";
+import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
 import type { CommonResult } from "./types";
 
 // 后端基础地址（可通过环境变量 NEXT_PUBLIC_API_BASE_URL 覆盖）
@@ -57,7 +58,7 @@ function handleAuthFailure() {
   if (typeof window === "undefined") return;
   localStorage.removeItem("auth-storage");
   // 清除 auth-token cookie
-  document.cookie = "auth-token=; path=/; max-age=0";
+  clearAuthCookie();
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -183,6 +184,7 @@ http.interceptors.response.use(
       const result = refreshResp.data as CommonResult<{
         accessToken: string;
         refreshToken: string;
+        expiresIn?: number;
       }>;
 
       if (result.code !== 0 || !result.data) {
@@ -195,7 +197,7 @@ http.interceptors.response.use(
       updateAuthStorage(accessToken, refreshToken);
 
       // 同步更新 cookie（供 Next.js middleware 路由守卫使用）
-      document.cookie = `auth-token=${accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      setAuthCookie(accessToken, result.data.expiresIn);
 
       // 尝试更新 zustand store（如果已初始化）
       try {

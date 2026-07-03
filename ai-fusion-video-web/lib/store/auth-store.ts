@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import * as authApi from "@/lib/api/auth";
+import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
 import type { UserRespVO } from "@/lib/api/types";
 
 // 认证状态类型
@@ -16,6 +17,7 @@ interface AuthState {
   // Actions
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshSession: () => Promise<boolean>;
   fetchUserInfo: () => Promise<void>;
   setTokens: (accessToken: string, refreshToken: string) => void;
   clearAuth: () => void;
@@ -33,6 +35,7 @@ export const useAuthStore = create<AuthState>()(
       // 登录
       login: async (username: string, password: string) => {
         const resp = await authApi.login({ username, password });
+        setAuthCookie(resp.accessToken, resp.expiresIn);
         set({
           token: resp.accessToken,
           refreshToken: resp.refreshToken,
@@ -63,7 +66,25 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           // 即使后端登出失败，前端也清除状态
         }
+        clearAuthCookie();
         set({ token: null, refreshToken: null, user: null });
+      },
+
+      // 刷新当前会话，用于重新打开站点时续 24 小时有效期
+      refreshSession: async () => {
+        const currentRefreshToken = get().refreshToken;
+        if (!currentRefreshToken) {
+          return false;
+        }
+        try {
+          const resp = await authApi.refreshToken(currentRefreshToken);
+          setAuthCookie(resp.accessToken, resp.expiresIn);
+          set({ token: resp.accessToken, refreshToken: resp.refreshToken });
+          return true;
+        } catch {
+          get().clearAuth();
+          return false;
+        }
       },
 
       // 获取用户信息
@@ -79,6 +100,7 @@ export const useAuthStore = create<AuthState>()(
 
       // 清除认证状态（无需调后端）
       clearAuth: () => {
+        clearAuthCookie();
         set({ token: null, refreshToken: null, user: null });
       },
     }),

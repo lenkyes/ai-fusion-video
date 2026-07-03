@@ -58,13 +58,6 @@ function LoginContent() {
     try {
       await login(username, password);
 
-      // 设置 cookie 供 proxy 使用
-      const store = JSON.parse(localStorage.getItem("auth-storage") || "{}");
-      const token = store?.state?.token;
-      if (token) {
-        document.cookie = `auth-token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-      }
-
       // 触发成功动画，跳转由 onTransitionComplete 回调驱动
       setShowSuccess(true);
     } catch (err) {

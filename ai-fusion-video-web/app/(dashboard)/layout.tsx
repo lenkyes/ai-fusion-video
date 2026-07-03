@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useState, useMemo, useRef, useSyncExternalStore } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
@@ -20,6 +20,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const refreshSession = useAuthStore((s) => s.refreshSession);
   const authHydrated = useSyncExternalStore(
     (onStoreChange) => {
       const unsubStart = useAuthStore.persist.onHydrate(onStoreChange);
@@ -32,6 +33,8 @@ export default function DashboardLayout({
     () => useAuthStore.persist.hasHydrated(),
     () => false
   );
+  const [sessionReady, setSessionReady] = useState(false);
+  const lastSessionRefreshAtRef = useRef(0);
   const [sidebarRoute, setSidebarRoute] = useState<string | null>(null);
   const [projectState, setProjectState] = useState<{ id: number; project: Project } | null>(null);
   const sidebarOpen = sidebarRoute === pathname;
@@ -48,9 +51,59 @@ export default function DashboardLayout({
     [fullWidth, setFullWidth]
   );
 
+  useEffect(() => {
+    if (!authHydrated) {
+      setSessionReady(false);
+      return;
+    }
+    if (!isAuthenticated) {
+      setSessionReady(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSessionReady(false);
+    lastSessionRefreshAtRef.current = Date.now();
+
+    void refreshSession().finally(() => {
+      if (!cancelled) {
+        setSessionReady(useAuthStore.getState().isAuthenticated());
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authHydrated, isAuthenticated, refreshSession]);
+
+  useEffect(() => {
+    if (!authHydrated || !isAuthenticated) {
+      return;
+    }
+
+    const renewVisibleSession = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastSessionRefreshAtRef.current < 5 * 60 * 1000) {
+        return;
+      }
+      lastSessionRefreshAtRef.current = now;
+      void refreshSession();
+    };
+
+    window.addEventListener("focus", renewVisibleSession);
+    document.addEventListener("visibilitychange", renewVisibleSession);
+    return () => {
+      window.removeEventListener("focus", renewVisibleSession);
+      document.removeEventListener("visibilitychange", renewVisibleSession);
+    };
+  }, [authHydrated, isAuthenticated, refreshSession]);
+
   // 在 layout 层统一请求 project 数据，供桌面/移动端 SidebarNav 共享
   useEffect(() => {
-    if (currentProjectId === null) {
+    if (!sessionReady || !isAuthenticated || currentProjectId === null) {
       return;
     }
     let cancelled = false;
@@ -65,7 +118,7 @@ export default function DashboardLayout({
     return () => {
       cancelled = true;
     };
-  }, [currentProjectId]);
+  }, [currentProjectId, isAuthenticated, sessionReady]);
 
   // 运行时登出检测：用户主动登出后跳转到登录页
   // 初始进入时的认证保护由 middleware 处理
@@ -75,7 +128,7 @@ export default function DashboardLayout({
     }
   }, [authHydrated, isAuthenticated, router]);
 
-  const ready = authHydrated && isAuthenticated;
+  const ready = authHydrated && isAuthenticated && sessionReady;
 
   return (
     <LayoutContext value={layoutCtx}>
@@ -88,7 +141,7 @@ export default function DashboardLayout({
           animate={ready ? { opacity: 1, y: 0 } : { opacity: 0, y: -20 }}
           transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          <AppHeader />
+          {ready ? <AppHeader /> : null}
         </motion.div>
 
         {/* 侧边栏 + 主内容 */}

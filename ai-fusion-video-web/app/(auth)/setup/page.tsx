@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AuthLayout } from "@/components/ui/auth-layout";
+import { setAuthCookie } from "@/lib/auth-cookie";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { setupAdmin } from "@/lib/api/system-init";
 
@@ -72,7 +73,7 @@ export default function SetupPage() {
       });
 
       // 设置 cookie 供 proxy 使用
-      document.cookie = `auth-token=${resp.accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      setAuthCookie(resp.accessToken, resp.expiresIn);
 
       // 触发成功动画，跳转由 onTransitionComplete 回调驱动
       setShowSuccess(true);

@@ -17,6 +17,7 @@ import type { MenuDisplayMode } from "@/components/ui/glow-menu";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { UserAvatarDropdown } from "@/components/ui/menu";
 import { NotificationPanel } from "@/components/dashboard/notification-panel";
+import { clearAuthCookie } from "@/lib/auth-cookie";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 import { cn } from "@/lib/utils";
@@ -124,7 +125,7 @@ export function AppHeader() {
   const handleLogout = async () => {
     // 等待下拉菜单关闭动画（~200ms）
     await new Promise((resolve) => setTimeout(resolve, 200));
-    document.cookie = "auth-token=; path=/; max-age=0";
+    clearAuthCookie();
     await logout();
   };
 

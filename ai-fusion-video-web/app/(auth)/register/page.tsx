@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AuthLayout } from "@/components/ui/auth-layout";
+import { setAuthCookie } from "@/lib/auth-cookie";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { getInitStatus } from "@/lib/api/system-init";
 import { register as registerApi } from "@/lib/api/auth";
@@ -88,7 +89,7 @@ export default function RegisterPage() {
         },
       });
 
-      document.cookie = `auth-token=${resp.accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      setAuthCookie(resp.accessToken, resp.expiresIn);
       setShowSuccess(true);
     } catch (err) {
       if (err instanceof Error) {
