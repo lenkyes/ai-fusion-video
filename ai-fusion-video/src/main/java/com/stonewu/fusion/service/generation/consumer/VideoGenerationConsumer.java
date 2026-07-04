@@ -22,11 +22,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -40,6 +44,8 @@ public class VideoGenerationConsumer {
     private static final String BASE_QUEUE_NAME = "video_generation";
     private static final String MODEL_QUEUE_PREFIX = BASE_QUEUE_NAME + ":model:";
     private static final int MODEL_TYPE_VIDEO = 3;
+    private static final int RUNNING_LEASE_MINUTES = 60;
+    private static final int RECOVERY_STALE_MINUTES = 90;
 
     private final RedisTaskQueue taskQueue;
     private final VideoGenerationService videoGenerationService;
@@ -52,6 +58,11 @@ public class VideoGenerationConsumer {
     private final AtomicInteger workerThreadCounter = new AtomicInteger(1);
     private final ExecutorService workerExecutor = Executors.newCachedThreadPool(r -> {
         Thread thread = new Thread(r, "video-generation-worker-" + workerThreadCounter.getAndIncrement());
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final ScheduledExecutorService leaseRenewExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "video-generation-lease-renewer");
         thread.setDaemon(true);
         return thread;
     });
@@ -87,6 +98,43 @@ public class VideoGenerationConsumer {
         taskQueue.push(queueName, taskId);
         log.info("[VideoConsumer] 任务入队: taskId={}, queue={}, modelId={}", taskId, queueName, task.getModelId());
         return taskId;
+    }
+
+    public String retryTask(Long id, Long userId) {
+        VideoTask existing = videoGenerationService.getById(id);
+        if (userId != null && !userId.equals(existing.getUserId())) {
+            throw new BusinessException(403, "无权重试该视频生成任务");
+        }
+        if (existing.getStatus() == null || existing.getStatus() != 3) {
+            throw new BusinessException("仅失败任务可重试");
+        }
+
+        VideoTask task = videoGenerationService.resetForRetry(id);
+        String queueName = resolveQueueName(task.getModelId());
+        refreshQueueMaxConcurrent(queueName, task.getModelId());
+        taskQueue.push(queueName, task.getTaskId());
+        log.info("[VideoConsumer] 失败任务已重新入队: taskId={}, queue={}", task.getTaskId(), queueName);
+        return task.getTaskId();
+    }
+
+    public int recoverExpiredRunningTasks(Long userId) {
+        LocalDateTime before = LocalDateTime.now().minusMinutes(RECOVERY_STALE_MINUTES);
+        int recovered = 0;
+        for (VideoTask task : videoGenerationService.findRunningBefore(before, userId)) {
+            if (task.getModelId() == null || StrUtil.isBlank(task.getTaskId())) {
+                continue;
+            }
+            String queueName = resolveQueueName(task.getModelId());
+            if (taskQueue.isRunning(queueName, task.getTaskId())) {
+                continue;
+            }
+            videoGenerationService.markRecoveredToQueued(task.getId(), "运行租约已失效，已自动恢复排队");
+            refreshQueueMaxConcurrent(queueName, task.getModelId());
+            taskQueue.push(queueName, task.getTaskId());
+            recovered++;
+            log.warn("[VideoConsumer] 发现卡住的视频任务，已恢复排队: taskId={}, queue={}", task.getTaskId(), queueName);
+        }
+        return recovered;
     }
 
     private void applyTaskDefaults(VideoTask task, AiModel model) {
@@ -260,16 +308,44 @@ public class VideoGenerationConsumer {
 
     private void dispatchTask(String queueName, String taskId) {
         workerExecutor.execute(() -> {
+            ScheduledFuture<?> leaseRenewal = null;
             try {
-                taskQueue.markRunning(queueName, taskId, 60);
+                taskQueue.markRunning(queueName, taskId, RUNNING_LEASE_MINUTES);
+                leaseRenewal = leaseRenewExecutor.scheduleAtFixedRate(
+                        () -> renewLeaseQuietly(queueName, taskId, RUNNING_LEASE_MINUTES),
+                        Math.max(1, RUNNING_LEASE_MINUTES / 3),
+                        Math.max(1, RUNNING_LEASE_MINUTES / 3),
+                        TimeUnit.MINUTES);
                 processTask(queueName, taskId);
             } catch (Exception e) {
                 log.error("[VideoConsumer] 任务处理失败: taskId={}", taskId, e);
             } finally {
+                if (leaseRenewal != null) {
+                    leaseRenewal.cancel(false);
+                }
                 taskQueue.markComplete(queueName, taskId);
                 taskQueue.release(queueName);
             }
         });
+    }
+
+    private void renewLeaseQuietly(String queueName, String taskId, int timeoutMinutes) {
+        try {
+            boolean renewed = taskQueue.renewLease(queueName, taskId, timeoutMinutes);
+            if (!renewed) {
+                log.warn("[VideoConsumer] 任务运行租约续期失败: taskId={}, queue={}", taskId, queueName);
+            }
+        } catch (Exception e) {
+            log.warn("[VideoConsumer] 任务运行租约续期异常: taskId={}, queue={}", taskId, queueName, e);
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${app.generation.video.recovery-scan-delay-ms:60000}")
+    public void recoverExpiredRunningTasks() {
+        int recovered = recoverExpiredRunningTasks(null);
+        if (recovered > 0) {
+            log.warn("[VideoConsumer] 已自动恢复视频生成任务数量: {}", recovered);
+        }
     }
 
     private void processTask(String queueName, String taskId) {
@@ -373,6 +449,7 @@ public class VideoGenerationConsumer {
     @PreDestroy
     public void shutdownWorkerExecutor() {
         workerExecutor.shutdownNow();
+        leaseRenewExecutor.shutdownNow();
     }
 
     /**

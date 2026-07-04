@@ -20,12 +20,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -42,6 +46,8 @@ public class ImageGenerationConsumer {
     private static final String BASE_QUEUE_NAME = "image_generation";
     private static final String MODEL_QUEUE_PREFIX = BASE_QUEUE_NAME + ":model:";
     private static final int MODEL_TYPE_IMAGE = 2;
+    private static final int RUNNING_LEASE_MINUTES = 30;
+    private static final int RECOVERY_STALE_MINUTES = 45;
 
     private final RedisTaskQueue taskQueue;
     private final ImageGenerationService imageGenerationService;
@@ -54,6 +60,11 @@ public class ImageGenerationConsumer {
     private final AtomicInteger workerThreadCounter = new AtomicInteger(1);
     private final ExecutorService workerExecutor = Executors.newCachedThreadPool(r -> {
         Thread thread = new Thread(r, "image-generation-worker-" + workerThreadCounter.getAndIncrement());
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final ScheduledExecutorService leaseRenewExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "image-generation-lease-renewer");
         thread.setDaemon(true);
         return thread;
     });
@@ -101,6 +112,43 @@ public class ImageGenerationConsumer {
         taskQueue.push(queueName, taskId);
         log.info("[ImageConsumer] 任务入队: taskId={}, queue={}, modelId={}", taskId, queueName, task.getModelId());
         return taskId;
+    }
+
+    public String retryTask(Long id, Long userId) {
+        ImageTask existing = imageGenerationService.getById(id);
+        if (userId != null && !userId.equals(existing.getUserId())) {
+            throw new BusinessException(403, "无权重试该图片生成任务");
+        }
+        if (existing.getStatus() == null || existing.getStatus() != 3) {
+            throw new BusinessException("仅失败任务可重试");
+        }
+
+        ImageTask task = imageGenerationService.resetForRetry(id);
+        String queueName = resolveQueueName(task.getModelId());
+        refreshQueueMaxConcurrent(queueName, task.getModelId());
+        taskQueue.push(queueName, task.getTaskId());
+        log.info("[ImageConsumer] 失败任务已重新入队: taskId={}, queue={}", task.getTaskId(), queueName);
+        return task.getTaskId();
+    }
+
+    public int recoverExpiredRunningTasks(Long userId) {
+        LocalDateTime before = LocalDateTime.now().minusMinutes(RECOVERY_STALE_MINUTES);
+        int recovered = 0;
+        for (ImageTask task : imageGenerationService.findRunningBefore(before, userId)) {
+            if (task.getModelId() == null || StrUtil.isBlank(task.getTaskId())) {
+                continue;
+            }
+            String queueName = resolveQueueName(task.getModelId());
+            if (taskQueue.isRunning(queueName, task.getTaskId())) {
+                continue;
+            }
+            imageGenerationService.markRecoveredToQueued(task.getId(), "运行租约已失效，已自动恢复排队");
+            refreshQueueMaxConcurrent(queueName, task.getModelId());
+            taskQueue.push(queueName, task.getTaskId());
+            recovered++;
+            log.warn("[ImageConsumer] 发现卡住的图片任务，已恢复排队: taskId={}, queue={}", task.getTaskId(), queueName);
+        }
+        return recovered;
     }
 
     /**
@@ -167,16 +215,44 @@ public class ImageGenerationConsumer {
 
     private void dispatchTask(String queueName, String taskId) {
         workerExecutor.execute(() -> {
+            ScheduledFuture<?> leaseRenewal = null;
             try {
-                taskQueue.markRunning(queueName, taskId, 30);
+                taskQueue.markRunning(queueName, taskId, RUNNING_LEASE_MINUTES);
+                leaseRenewal = leaseRenewExecutor.scheduleAtFixedRate(
+                        () -> renewLeaseQuietly(queueName, taskId, RUNNING_LEASE_MINUTES),
+                        Math.max(1, RUNNING_LEASE_MINUTES / 3),
+                        Math.max(1, RUNNING_LEASE_MINUTES / 3),
+                        TimeUnit.MINUTES);
                 processTask(queueName, taskId);
             } catch (Exception e) {
                 log.error("[ImageConsumer] 任务处理失败: taskId={}", taskId, e);
             } finally {
+                if (leaseRenewal != null) {
+                    leaseRenewal.cancel(false);
+                }
                 taskQueue.markComplete(queueName, taskId);
                 taskQueue.release(queueName);
             }
         });
+    }
+
+    private void renewLeaseQuietly(String queueName, String taskId, int timeoutMinutes) {
+        try {
+            boolean renewed = taskQueue.renewLease(queueName, taskId, timeoutMinutes);
+            if (!renewed) {
+                log.warn("[ImageConsumer] 任务运行租约续期失败: taskId={}, queue={}", taskId, queueName);
+            }
+        } catch (Exception e) {
+            log.warn("[ImageConsumer] 任务运行租约续期异常: taskId={}, queue={}", taskId, queueName, e);
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${app.generation.image.recovery-scan-delay-ms:60000}")
+    public void recoverExpiredRunningTasks() {
+        int recovered = recoverExpiredRunningTasks(null);
+        if (recovered > 0) {
+            log.warn("[ImageConsumer] 已自动恢复图片生成任务数量: {}", recovered);
+        }
     }
 
     private void processTask(String queueName, String taskId) {
@@ -347,6 +423,7 @@ public class ImageGenerationConsumer {
     @PreDestroy
     public void shutdownWorkerExecutor() {
         workerExecutor.shutdownNow();
+        leaseRenewExecutor.shutdownNow();
     }
 
     /**

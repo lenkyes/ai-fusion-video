@@ -1,6 +1,7 @@
 package com.stonewu.fusion.service.generation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import cn.hutool.core.util.StrUtil;
 import com.stonewu.fusion.common.PageResult;
@@ -13,9 +14,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -67,10 +70,11 @@ public class VideoGenerationService {
     @CacheEvict(value = "videoTask", allEntries = true)
     @Transactional
     public void updateStatus(Long id, Integer status, String errorMsg) {
-        VideoTask task = getById(id);
-        task.setStatus(status);
-        task.setErrorMsg(errorMsg);
-        taskMapper.updateById(task);
+        getById(id);
+        taskMapper.update(null, new LambdaUpdateWrapper<VideoTask>()
+                .eq(VideoTask::getId, id)
+                .set(VideoTask::getStatus, status)
+                .set(VideoTask::getErrorMsg, errorMsg));
     }
 
     @CacheEvict(value = "videoTask", allEntries = true)
@@ -102,6 +106,70 @@ public class VideoGenerationService {
 
     public List<VideoTask> findPendingTasks() {
         return taskMapper.selectList(new LambdaQueryWrapper<VideoTask>().in(VideoTask::getStatus, 0, 1));
+    }
+
+    public List<VideoTask> findRunningBefore(LocalDateTime before, Long userId) {
+        return taskMapper.selectList(new LambdaQueryWrapper<VideoTask>()
+                .eq(VideoTask::getStatus, 1)
+                .lt(before != null, VideoTask::getUpdateTime, before)
+                .eq(userId != null, VideoTask::getUserId, userId)
+                .orderByAsc(VideoTask::getUpdateTime));
+    }
+
+    @Caching(evict = {
+            @CacheEvict(value = "videoTask", allEntries = true),
+            @CacheEvict(value = "videoItems", allEntries = true)
+    })
+    @Transactional
+    public VideoTask resetForRetry(Long id) {
+        VideoTask task = getById(id);
+        if (task.getStatus() != null && task.getStatus() != 3) {
+            throw new BusinessException("仅失败任务可重试");
+        }
+        task.setStatus(0);
+        task.setErrorMsg(null);
+        task.setSuccessCount(0);
+        taskMapper.update(null, new LambdaUpdateWrapper<VideoTask>()
+                .eq(VideoTask::getId, id)
+                .set(VideoTask::getStatus, 0)
+                .set(VideoTask::getErrorMsg, null)
+                .set(VideoTask::getSuccessCount, 0));
+
+        itemMapper.update(null, new LambdaUpdateWrapper<VideoItem>()
+                .eq(VideoItem::getTaskId, id)
+                .set(VideoItem::getPlatformTaskId, null)
+                .set(VideoItem::getVideoUrl, null)
+                .set(VideoItem::getCoverUrl, null)
+                .set(VideoItem::getDuration, null)
+                .set(VideoItem::getFileSize, null)
+                .set(VideoItem::getFirstFrameUrl, null)
+                .set(VideoItem::getLastFrameUrl, null)
+                .set(VideoItem::getStatus, 0)
+                .set(VideoItem::getErrorMsg, null));
+
+        long itemCount = itemMapper.selectCount(new LambdaQueryWrapper<VideoItem>()
+                .eq(VideoItem::getTaskId, id));
+        int expectedCount = task.getCount() != null && task.getCount() > 0 ? task.getCount() : 1;
+        for (long i = itemCount; i < expectedCount; i++) {
+            itemMapper.insert(VideoItem.builder()
+                    .taskId(id)
+                    .status(0)
+                    .build());
+        }
+        return task;
+    }
+
+    @CacheEvict(value = "videoTask", allEntries = true)
+    @Transactional
+    public VideoTask markRecoveredToQueued(Long id, String message) {
+        VideoTask task = getById(id);
+        task.setStatus(0);
+        task.setErrorMsg(message);
+        taskMapper.update(null, new LambdaUpdateWrapper<VideoTask>()
+                .eq(VideoTask::getId, id)
+                .set(VideoTask::getStatus, 0)
+                .set(VideoTask::getErrorMsg, message));
+        return task;
     }
 
     public VideoTask findLatestByCategory(String category, Long userId, Long modelId) {

@@ -207,6 +207,11 @@ public class RedisTaskQueue {
         return matchedQueueNames;
     }
 
+    public Set<String> listRegisteredQueues() {
+        Set<String> queueNames = stringRedisTemplate.opsForSet().members(QUEUE_REGISTRY_KEY);
+        return queueNames == null ? Collections.emptySet() : new LinkedHashSet<>(queueNames);
+    }
+
     /**
      * 标记任务开始执行
      */
@@ -220,6 +225,14 @@ public class RedisTaskQueue {
      */
     public void markComplete(String queueName, String taskId) {
         stringRedisTemplate.delete(getRunningKey(queueName, taskId));
+    }
+
+    /**
+     * 判断任务运行租约是否仍然存在。
+     */
+    public boolean isRunning(String queueName, String taskId) {
+        Boolean exists = stringRedisTemplate.hasKey(getRunningKey(queueName, taskId));
+        return Boolean.TRUE.equals(exists);
     }
 
     /**
