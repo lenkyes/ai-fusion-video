@@ -72,6 +72,7 @@ class GenerateVideoToolExecutorTests {
         verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(12345L));
         assertThat(taskCaptor.getValue().getModelId()).isEqualTo(31L);
         assertThat(taskCaptor.getValue().getCategory()).isEqualTo("storyboard_item:3307");
+        assertThat(taskCaptor.getValue().getGenerateAudio()).isTrue();
         assertThat(result).contains("\"status\":\"success\"");
         assertThat(result).contains("video.mp4");
     }

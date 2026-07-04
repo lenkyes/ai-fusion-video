@@ -138,6 +138,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                         .set("type", "array")
                         .set("items", JSONUtil.createObj().set("type", "string"))
                         .set("description", referenceAudioDescription))
+                    .set("generateAudio", JSONUtil.createObj()
+                        .set("type", "boolean")
+                        .set("description", "是否让支持的生视频模型生成原生配音、环境声和音效，默认 true；需要静音素材或后期另配音时传 false"))
                     .set("storyboardItemId", JSONUtil.createObj()
                         .set("type", "integer")
                         .set("description", "分镜镜头ID；批量分镜生成时必须传，用于幂等防重复提交远端视频任务"))
@@ -185,6 +188,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             String ratio = params.getStr("ratio", "16:9");
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
+            Boolean generateAudio = params.getBool("generateAudio", true);
             Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
             boolean forceRegenerate = params.getBool("forceRegenerate",
                     params.getBool("overwriteExistingVideo", false));
@@ -253,6 +257,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .ratio(ratio)
                     .duration(duration)
                     .cameraFixed(cameraFixed)
+                    .generateAudio(generateAudio)
                     .modelId(model.getId())
                     .category(idempotencyCategory)
                     .count(1)

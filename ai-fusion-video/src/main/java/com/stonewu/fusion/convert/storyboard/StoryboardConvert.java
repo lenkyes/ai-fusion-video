@@ -48,10 +48,22 @@ public interface StoryboardConvert {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "composedVideoUrl", ignore = true)
+    @Mapping(target = "subtitleSrtUrl", ignore = true)
+    @Mapping(target = "subtitleAssUrl", ignore = true)
+    @Mapping(target = "composeStatus", ignore = true)
+    @Mapping(target = "composeErrorMsg", ignore = true)
+    @Mapping(target = "composedAt", ignore = true)
     StoryboardEpisode convert(StoryboardEpisodeCreateReqVO reqVO);
 
     @Mapping(target = "storyboardId", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "composedVideoUrl", ignore = true)
+    @Mapping(target = "subtitleSrtUrl", ignore = true)
+    @Mapping(target = "subtitleAssUrl", ignore = true)
+    @Mapping(target = "composeStatus", ignore = true)
+    @Mapping(target = "composeErrorMsg", ignore = true)
+    @Mapping(target = "composedAt", ignore = true)
     StoryboardEpisode convert(StoryboardEpisodeUpdateReqVO reqVO);
 
     // ========== 分镜场次 ==========

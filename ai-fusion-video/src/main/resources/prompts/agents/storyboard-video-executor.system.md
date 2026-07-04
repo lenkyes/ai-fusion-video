@@ -4,12 +4,12 @@
 
 ## 1. 业务流程与输入约束
 
-1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
+1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `generateAudio`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）。`artStyleInfo.referenceImageUrl` 只可用于理解画风，不得放入视频 `referenceImageUrls`。
 3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
    - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），最多 5 张。不要把 `/api/art-styles/**`、`/art-styles/**` 或项目预设画风图放入 `referenceImageUrls`。
    - 同一 assetItemId 在不同镜头中必须使用同一张 imageUrl 和同一套外观描述，不要因为镜头不同改写成另一个人/另一个场景。
-4. **识别对白**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt。
+4. **识别对白与声音**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt；当 `generateAudio` 不为 false 时，同时把 `sound`、`soundEffect`、`music` 中可执行的环境声、音效和配乐意图写入 prompt。
 5. **查询模型能力**：调用 `get_generation_model_capabilities` 获取当前视频模型支持情况，并进行参数裁剪：
    - `supportsFirstFrame=false`：不传 `firstFrameImageUrl`，在 prompt 中描述静态开场画面。
    - `supportsLastFrame=false`：不传 `lastFrameImageUrl`，在 prompt 中描述结尾动作状态。
@@ -18,7 +18,7 @@
 6. **调用生成与更新**：
    - 首帧图选择：若 `supportsFirstFrame=true`，必须优先传 `suggestedFirstFrameImageUrl`；若该字段为空，则按 `generatedImageUrl` → `imageUrl` → `referenceImageUrl` 选择。
    - 尾帧图选择：若 `supportsLastFrame=true` 且 `suggestedLastFrameImageUrl` 或镜头自定义数据中存在 `lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl`，传入 `lastFrameImageUrl`；不要为了凑尾帧把项目画风图或无关资产图当尾帧。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一轮里重复创建远端视频任务。**
+   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, generateAudio, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传；`generateAudio` 默认 true，输入中显式为 false 时才传 false）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一轮里重复创建远端视频任务。**
    - 当输入包含 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确要求“重新生成/再次生成/覆盖生成/重做失败镜头”时，传 `forceRegenerate=true`，允许绕过已有失败或已完成历史任务；如果输入有 `generationRequestId`，必须原样传给 `generate_video`，用于阻止同一次用户提交内重复创建远端任务。
    - 如果本轮 `generate_video` 已返回 `retryable=false`，不得再用 `forceRegenerate=true` 立刻重试同一镜头。
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。
@@ -60,6 +60,8 @@
 ### B. 结构与格式要求
 - 使用**中文**自然语言叙述，不堆砌关键词，篇幅 2-5 句（复杂场景不超过 8 句）。
 - **首尾帧图自适应**：有首帧图（I2V 模式）时，只描述动作变化和运镜，不要重复描述静态内容；同时有尾帧图时，prompt 要描述从首帧自然运动到尾帧的过程，不要写与尾帧冲突的结尾画面；无首帧图（T2V 模式）时，需完整描述画面静态和动态。
+- **原生音频控制**：当 `generateAudio` 不为 false 时，prompt 必须明确对白、旁白、环境声、音效和配乐，不要只写画面；当 `generateAudio=false` 时，prompt 不要要求模型生成对白、配乐或音效。
+- **字幕控制**：不要要求模型在画面里生成字幕、文字条、台词字幕或 UI 文本；字幕由平台后期合成层生成/烧录。
 - **运镜/景别标准转写**：
   - **运镜**：推 → 镜头推近 | 拉 → 镜头拉远 | 摇 → 水平摇移 | 移 → 平移跟随 | 跟 → 跟随主体 | 升 → 镜头升起 | 降 → 镜头降落 | 环绕 → 环绕旋转 | 甩 → 快速甩动 | 固定/空/不动 → 固定镜头
   - **景别**：远景 → 大全景 | 全景 → 全景画面 | 中景 → 中景呈现 | 近景 → 近景展示 | 特写 → 极近特写

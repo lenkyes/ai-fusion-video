@@ -50,6 +50,12 @@ public class StoryboardEpisode extends BaseEntity {
     /** 本集合成视频URL */
     private String composedVideoUrl;
 
+    /** 本集外挂字幕 SRT URL */
+    private String subtitleSrtUrl;
+
+    /** 本集外挂字幕 ASS URL */
+    private String subtitleAssUrl;
+
     /** 合成状态: 0未开始 1合成中 2已完成 3失败 */
     @Builder.Default
     private Integer composeStatus = 0;

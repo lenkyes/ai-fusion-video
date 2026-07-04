@@ -16,6 +16,11 @@ import {
   Clapperboard,
   PlayCircle,
   AlertCircle,
+  Settings2,
+  Subtitles,
+  Volume2,
+  Music,
+  FileText,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
@@ -24,11 +29,13 @@ import { cn } from "@/lib/utils";
 import { scriptApi } from "@/lib/api/script";
 import {
   storyboardApi,
+  type ComposeEpisodeVideoReq,
   type Storyboard,
   type StoryboardEpisode,
   type StoryboardItem,
   type StoryboardScene,
 } from "@/lib/api/storyboard";
+import { resolveMediaUrl } from "@/lib/api/client";
 import { StoryboardSidebar } from "./_components/storyboard-sidebar";
 import { StoryboardTableView } from "./_components/storyboard-table-view";
 import { StoryboardCardView } from "./_components/storyboard-card-view";
@@ -51,6 +58,15 @@ interface SidebarSelection {
 interface SceneWithItems {
   scene: StoryboardScene;
   items: StoryboardItem[];
+}
+
+interface ComposeOptionsState {
+  generateSubtitleFiles: boolean;
+  burnSubtitles: boolean;
+  keepOriginalAudio: boolean;
+  originalAudioVolume: number;
+  bgmUrl: string;
+  bgmVolume: number;
 }
 
 export default function StoryboardTabPage() {
@@ -148,12 +164,25 @@ export default function StoryboardTabPage() {
 
   // 当前选中集的合成状态
   const [currentEpisode, setCurrentEpisode] = useState<StoryboardEpisode | null>(null);
+  const [composeOptionsOpen, setComposeOptionsOpen] = useState(false);
+  const [composeOptions, setComposeOptions] = useState<ComposeOptionsState>({
+    generateSubtitleFiles: true,
+    burnSubtitles: false,
+    keepOriginalAudio: true,
+    originalAudioVolume: 1,
+    bgmUrl: "",
+    bgmVolume: 0.25,
+  });
 
   // 当前选中的 episodeId（episode 或 scene 选择都会有）
   const currentEpisodeId =
     sidebarSelection.type === "episode" || sidebarSelection.type === "scene"
       ? sidebarSelection.episodeId ?? null
       : null;
+
+  useEffect(() => {
+    setComposeOptionsOpen(false);
+  }, [currentEpisodeId]);
 
   // 拉取当前集详情（含合成状态）
   const refreshCurrentEpisode = useCallback(async () => {
@@ -657,6 +686,18 @@ export default function StoryboardTabPage() {
     refreshCurrentEpisode();
   }, [refreshCurrentEpisode]);
 
+  const buildComposeEpisodeReq = useCallback((): ComposeEpisodeVideoReq => {
+    const bgmUrl = composeOptions.bgmUrl.trim();
+    return {
+      generateSubtitleFiles: composeOptions.generateSubtitleFiles,
+      burnSubtitles: composeOptions.burnSubtitles,
+      keepOriginalAudio: composeOptions.keepOriginalAudio,
+      originalAudioVolume: composeOptions.originalAudioVolume,
+      bgmUrl: bgmUrl || undefined,
+      bgmVolume: composeOptions.bgmVolume,
+    };
+  }, [composeOptions]);
+
   /** 提交本集合成视频任务 */
   const handleComposeEpisodeVideo = useCallback(async () => {
     if (!currentEpisodeId || !currentEpisode) return;
@@ -675,7 +716,10 @@ export default function StoryboardTabPage() {
     );
     setNotificationOpen(true);
     try {
-      const taskId = await storyboardApi.composeEpisodeVideo(currentEpisodeId);
+      const taskId = await storyboardApi.composeEpisodeVideo(
+        currentEpisodeId,
+        buildComposeEpisodeReq()
+      );
       setSubmittingComposeEpisodeIds((prev) =>
         prev.filter((id) => id !== currentEpisodeId)
       );
@@ -711,6 +755,7 @@ export default function StoryboardTabPage() {
     currentEpisode,
     submittingComposeEpisodeIds,
     runningComposeEpisodeIds,
+    buildComposeEpisodeReq,
     projectId,
     attachTaskStream,
     setNotificationOpen,
@@ -737,6 +782,7 @@ export default function StoryboardTabPage() {
           context: {
             selectedStoryboardItemIds: [itemId],
             storyboardId: storyboard.id,
+            generateAudio: true,
             forceRegenerate: true,
             overwriteExistingVideo: true,
             generationRequestId,
@@ -883,6 +929,146 @@ export default function StoryboardTabPage() {
             </h2>
           </div>
           <div className="flex items-center gap-2">
+            {currentEpisodeId && currentEpisode && (() => {
+              const isBusy =
+                submittingComposeEpisodeIds.includes(currentEpisodeId) ||
+                runningComposeEpisodeIds.includes(currentEpisodeId) ||
+                currentEpisode.composeStatus === 1;
+              return (
+                <div className="relative hidden sm:block shrink-0">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => setComposeOptionsOpen((open) => !open)}
+                    className={cn(
+                      "flex items-center justify-center w-8 h-8 rounded-lg border border-border/30 bg-muted/20 transition-colors",
+                      isBusy
+                        ? "text-muted-foreground/50 cursor-not-allowed"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    )}
+                    title="合成后期设置"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </button>
+                  {composeOptionsOpen && !isBusy && (
+                    <div className="absolute right-0 top-10 z-30 w-80 rounded-xl border border-border/30 bg-background/95 p-3 shadow-xl backdrop-blur">
+                      <div className="space-y-2.5">
+                        <label className="flex items-center justify-between gap-3 text-xs">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <Subtitles className="h-3.5 w-3.5 text-primary" />
+                            外挂字幕
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={composeOptions.generateSubtitleFiles}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                generateSubtitleFiles: event.target.checked,
+                              }))
+                            }
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-3 text-xs">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <FileText className="h-3.5 w-3.5 text-primary" />
+                            烧录字幕
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={composeOptions.burnSubtitles}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                burnSubtitles: event.target.checked,
+                              }))
+                            }
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-3 text-xs">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <Volume2 className="h-3.5 w-3.5 text-primary" />
+                            保留原声
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={composeOptions.keepOriginalAudio}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                keepOriginalAudio: event.target.checked,
+                              }))
+                            }
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </label>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>原声音量</span>
+                            <span>{composeOptions.originalAudioVolume.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={2}
+                            step={0.05}
+                            disabled={!composeOptions.keepOriginalAudio}
+                            value={composeOptions.originalAudioVolume}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                originalAudioVolume: Number(event.target.value),
+                              }))
+                            }
+                            className="w-full accent-primary disabled:opacity-40"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="flex items-center gap-1.5 text-xs text-foreground">
+                            <Music className="h-3.5 w-3.5 text-primary" />
+                            BGM URL
+                          </label>
+                          <input
+                            value={composeOptions.bgmUrl}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                bgmUrl: event.target.value,
+                              }))
+                            }
+                            placeholder="https://..."
+                            className="w-full rounded-lg border border-border/30 bg-muted/20 px-2.5 py-1.5 text-xs outline-none focus:border-primary/50"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>BGM 音量</span>
+                            <span>{composeOptions.bgmVolume.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={2}
+                            step={0.05}
+                            disabled={!composeOptions.bgmUrl.trim()}
+                            value={composeOptions.bgmVolume}
+                            onChange={(event) =>
+                              setComposeOptions((prev) => ({
+                                ...prev,
+                                bgmVolume: Number(event.target.value),
+                              }))
+                            }
+                            className="w-full accent-primary disabled:opacity-40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* 合成本集视频 */}
             {currentEpisodeId && currentEpisode && (() => {
               const cs = currentEpisode.composeStatus;
@@ -923,6 +1109,30 @@ export default function StoryboardTabPage() {
                       <PlayCircle className="h-3.5 w-3.5" />
                       查看本集视频
                     </button>
+                    {currentEpisode.subtitleSrtUrl && (
+                      <a
+                        href={resolveMediaUrl(currentEpisode.subtitleSrtUrl) || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-border/30 bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                        title="打开 SRT 字幕"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        SRT
+                      </a>
+                    )}
+                    {currentEpisode.subtitleAssUrl && (
+                      <a
+                        href={resolveMediaUrl(currentEpisode.subtitleAssUrl) || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-border/30 bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                        title="打开 ASS 字幕"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        ASS
+                      </a>
+                    )}
                     <button
                       onClick={handleComposeEpisodeVideo}
                       className="flex items-center justify-center w-8 h-8 rounded-lg border border-border/30 bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"

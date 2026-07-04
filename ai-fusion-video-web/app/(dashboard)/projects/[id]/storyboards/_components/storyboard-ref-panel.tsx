@@ -251,7 +251,12 @@ function SceneAssetPanel({
   };
 
   /** 批量生视频确认 */
-  const handleVideoGenConfirm = (selectedItemIds: number[], promptOnly?: boolean) => {
+  const handleVideoGenConfirm = (
+    selectedItemIds: number[],
+    options?: { promptOnly?: boolean; generateAudio?: boolean }
+  ) => {
+    const promptOnly = options?.promptOnly ?? false;
+    const generateAudio = options?.generateAudio ?? true;
     const generationRequestId = `storyboard-video-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}`;
@@ -267,7 +272,8 @@ function SceneAssetPanel({
         context: {
           selectedStoryboardItemIds: selectedItemIds,
           storyboardId: storyboard.id,
-          promptOnly: promptOnly || false,
+          promptOnly,
+          generateAudio,
           forceRegenerate: true,
           overwriteExistingVideo: true,
           generationRequestId,

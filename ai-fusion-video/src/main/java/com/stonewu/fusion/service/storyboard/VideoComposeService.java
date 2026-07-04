@@ -2,6 +2,7 @@ package com.stonewu.fusion.service.storyboard;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.stonewu.fusion.common.BusinessException;
+import com.stonewu.fusion.controller.storyboard.vo.ComposeEpisodeVideoReqVO;
 import com.stonewu.fusion.entity.storage.StorageConfig;
 import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
@@ -26,6 +27,8 @@ import java.net.IDN;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,6 +66,11 @@ public class VideoComposeService {
     public static final int STATUS_RUNNING = 1;
     public static final int STATUS_DONE = 2;
     public static final int STATUS_FAILED = 3;
+
+    private static final double DEFAULT_CLIP_DURATION_SECONDS = 5.0;
+    private static final double DEFAULT_ORIGINAL_AUDIO_VOLUME = 1.0;
+    private static final double DEFAULT_BGM_VOLUME = 0.25;
+    private static final double MAX_AUDIO_VOLUME = 2.0;
 
     private final StoryboardService storyboardService;
     private final StoryboardEpisodeMapper episodeMapper;
@@ -105,6 +113,11 @@ public class VideoComposeService {
      * 若已在合成中则抛出异常。
      */
     public String submitCompose(Long episodeId, Long userId) {
+        return submitCompose(episodeId, userId, ComposeOptions.defaults());
+    }
+
+    public String submitCompose(Long episodeId, Long userId, ComposeOptions options) {
+        ComposeOptions effectiveOptions = options != null ? options : ComposeOptions.defaults();
         StoryboardEpisode episode = episodeMapper.selectById(episodeId);
         if (episode == null) {
             throw new BusinessException(404, "分镜集不存在: " + episodeId);
@@ -125,8 +138,8 @@ public class VideoComposeService {
                 TASK_INITIAL_MESSAGE
         );
 
-        List<String> videoUrls = collectVideoUrls(episodeId);
-        if (videoUrls.isEmpty()) {
+        List<ComposeClip> clips = collectComposeClips(episodeId);
+        if (clips.isEmpty()) {
             String message = "本集没有可合成的视频，请先生成镜头视频";
             markFailed(episodeId, message);
             taskStreamService.fail(taskId, message);
@@ -139,6 +152,8 @@ public class VideoComposeService {
             .set("compose_status", STATUS_RUNNING)
             .set("compose_error_msg", null)
             .set("composed_video_url", null)
+            .set("subtitle_srt_url", null)
+            .set("subtitle_ass_url", null)
             .set("composed_at", null));
         if (updated == 0) {
             taskStreamService.fail(taskId, "本集已在合成中，请稍候");
@@ -148,7 +163,7 @@ public class VideoComposeService {
         try {
             videoComposeExecutor.execute(() -> {
                 try {
-                    doCompose(episodeId, taskId, videoUrls);
+                    doCompose(episodeId, taskId, clips, effectiveOptions);
                 } catch (Throwable t) {
                     String errorMessage = resolveErrorMessage(t);
                     log.error("[VideoCompose] 合成失败: episodeId={}", episodeId, t);
@@ -164,19 +179,22 @@ public class VideoComposeService {
         return taskId;
     }
 
-    private void doCompose(Long episodeId, String taskId, List<String> videoUrls) throws Exception {
+    private void doCompose(Long episodeId, String taskId, List<ComposeClip> clips,
+                           ComposeOptions options) throws Exception {
         log.info("[VideoCompose] 开始合成 episodeId={}, taskId={}", episodeId, taskId);
         long startMs = System.currentTimeMillis();
-        log.info("[VideoCompose] episodeId={}, 待合成视频数={}", episodeId, videoUrls.size());
+        log.info("[VideoCompose] episodeId={}, 待合成视频数={}, options={}", episodeId, clips.size(), options);
 
         Path workDir = Files.createTempDirectory("compose_ep_" + episodeId + "_");
         try {
             List<Path> localFiles = new ArrayList<>();
-            for (int i = 0; i < videoUrls.size(); i++) {
+            for (int i = 0; i < clips.size(); i++) {
                 Path local = workDir.resolve(String.format("v%04d.mp4", i));
-                downloadToFile(videoUrls.get(i), local);
+                downloadToFile(clips.get(i).videoUrl(), local);
                 localFiles.add(local);
             }
+
+            SubtitleFiles subtitleFiles = buildSubtitleFiles(workDir, clips);
 
             Path listFile = workDir.resolve("list.txt");
             StringBuilder sb = new StringBuilder();
@@ -196,21 +214,51 @@ public class VideoComposeService {
                 throw new RuntimeException("ffmpeg 合成失败（concat 与 filter 均失败）");
             }
 
-            String storedUrl = mediaStorageService.storeFile(output, "videos/composed", "mp4");
+            Path bgmFile = null;
+            if (StringUtils.hasText(options.bgmUrl())) {
+                bgmFile = workDir.resolve("bgm" + resolveMediaExtension(options.bgmUrl(), "mp3"));
+                downloadToFile(options.bgmUrl(), bgmFile);
+            }
+
+            Path finalOutput = output;
+            boolean shouldBurnSubtitles = options.burnSubtitles() && subtitleFiles.hasSubtitle();
+            if (shouldBurnSubtitles || bgmFile != null
+                    || !options.keepOriginalAudio()
+                    || !isDefaultVolume(options.originalAudioVolume())) {
+                Path processed = workDir.resolve("output_processed.mp4");
+                ok = runFfmpegPostProcess(output, shouldBurnSubtitles ? subtitleFiles.assFile() : null,
+                        bgmFile, processed, options);
+                if (!ok || !Files.exists(processed) || Files.size(processed) == 0) {
+                    throw new RuntimeException("ffmpeg 后处理失败（字幕/音频混合）");
+                }
+                finalOutput = processed;
+            }
+
+            String storedUrl = mediaStorageService.storeFile(finalOutput, "videos/composed", "mp4");
             log.info("[VideoCompose] 已保存到存储: {}", storedUrl);
+            String srtUrl = null;
+            String assUrl = null;
+            if (options.generateSubtitleFiles() && subtitleFiles.hasSubtitle()) {
+                srtUrl = mediaStorageService.storeFile(subtitleFiles.srtFile(), "subtitles", "srt");
+                assUrl = mediaStorageService.storeFile(subtitleFiles.assFile(), "subtitles", "ass");
+                log.info("[VideoCompose] 已保存外挂字幕: srt={}, ass={}", srtUrl, assUrl);
+            }
 
             StoryboardEpisode update = new StoryboardEpisode();
             update.setId(episodeId);
             update.setComposedVideoUrl(storedUrl);
+            update.setSubtitleSrtUrl(srtUrl);
+            update.setSubtitleAssUrl(assUrl);
             update.setComposeStatus(STATUS_DONE);
             update.setComposedAt(LocalDateTime.now());
             update.setComposeErrorMsg(null);
             episodeMapper.updateById(update);
 
-                taskStreamService.complete(taskId, "✓ 合成完成 · 视频地址：" + storedUrl);
+            String subtitleText = StringUtils.hasText(srtUrl) ? " · 字幕：" + srtUrl : "";
+            taskStreamService.complete(taskId, "✓ 合成完成 · 视频地址：" + storedUrl + subtitleText);
 
             log.info("[VideoCompose] 完成 episodeId={}, 耗时={}ms, 视频数={}",
-                    episodeId, System.currentTimeMillis() - startMs, videoUrls.size());
+                    episodeId, System.currentTimeMillis() - startMs, clips.size());
         } finally {
             try {
                 FileSystemUtils.deleteRecursively(workDir.toFile());
@@ -242,11 +290,11 @@ public class VideoComposeService {
         return "合成失败";
     }
 
-    private List<String> collectVideoUrls(Long episodeId) {
+    private List<ComposeClip> collectComposeClips(Long episodeId) {
         List<StoryboardScene> scenes = new ArrayList<>(storyboardService.listScenesByEpisode(episodeId));
         scenes.sort(Comparator.comparing(s -> Optional.ofNullable(s.getSortOrder()).orElse(0)));
 
-        List<String> urls = new ArrayList<>();
+        List<ComposeClip> clips = new ArrayList<>();
         for (StoryboardScene scene : scenes) {
             List<StoryboardItem> items = new ArrayList<>(storyboardService.listItemsByScene(scene.getId()));
             items.sort(Comparator.comparing(i -> Optional.ofNullable(i.getSortOrder()).orElse(0)));
@@ -255,11 +303,125 @@ public class VideoComposeService {
                         ? item.getVideoUrl()
                         : item.getGeneratedVideoUrl();
                 if (StringUtils.hasText(url)) {
-                    urls.add(url);
+                    clips.add(new ComposeClip(item, url));
                 }
             }
         }
-        return urls;
+        return clips;
+    }
+
+    private SubtitleFiles buildSubtitleFiles(Path workDir, List<ComposeClip> clips) throws IOException {
+        Path srtFile = workDir.resolve("subtitles.srt");
+        Path assFile = workDir.resolve("subtitles.ass");
+
+        StringBuilder srt = new StringBuilder();
+        StringBuilder ass = new StringBuilder();
+        ass.append("[Script Info]\n")
+                .append("ScriptType: v4.00+\n")
+                .append("PlayResX: 1920\n")
+                .append("PlayResY: 1080\n")
+                .append("ScaledBorderAndShadow: yes\n\n")
+                .append("[V4+ Styles]\n")
+                .append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ")
+                .append("Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, ")
+                .append("Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
+                .append("Style: Default,Arial,54,&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,")
+                .append("0,0,0,0,100,100,0,0,1,2,0,2,80,80,70,1\n\n")
+                .append("[Events]\n")
+                .append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
+
+        boolean hasSubtitle = false;
+        double cursorSeconds = 0;
+        int subtitleIndex = 1;
+        for (ComposeClip clip : clips) {
+            double durationSeconds = resolveClipDurationSeconds(clip.item());
+            String text = cleanDialogue(clip.item().getDialogue());
+            if (StringUtils.hasText(text)) {
+                double start = cursorSeconds;
+                double end = cursorSeconds + durationSeconds;
+                srt.append(subtitleIndex).append('\n')
+                        .append(formatSrtTime(start)).append(" --> ").append(formatSrtTime(end)).append('\n')
+                        .append(escapeSrtText(text)).append("\n\n");
+                ass.append("Dialogue: 0,")
+                        .append(formatAssTime(start)).append(',')
+                        .append(formatAssTime(end))
+                        .append(",Default,,0,0,0,,")
+                        .append(escapeAssText(text))
+                        .append('\n');
+                hasSubtitle = true;
+                subtitleIndex++;
+            }
+            cursorSeconds += durationSeconds;
+        }
+
+        Files.writeString(srtFile, srt.toString(), StandardCharsets.UTF_8);
+        Files.writeString(assFile, ass.toString(), StandardCharsets.UTF_8);
+        return new SubtitleFiles(srtFile, assFile, hasSubtitle);
+    }
+
+    private double resolveClipDurationSeconds(StoryboardItem item) {
+        BigDecimal duration = item != null ? item.getDuration() : null;
+        if (duration == null || duration.compareTo(BigDecimal.ZERO) <= 0) {
+            return DEFAULT_CLIP_DURATION_SECONDS;
+        }
+        return duration.setScale(3, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private String cleanDialogue(String dialogue) {
+        if (!StringUtils.hasText(dialogue)) {
+            return null;
+        }
+        String normalized = dialogue.replace("\r\n", "\n").replace('\r', '\n').trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if ("none".equals(lower) || "n/a".equals(lower) || "null".equals(lower)
+                || "无".equals(normalized) || "无对白".equals(normalized) || "无台词".equals(normalized)) {
+            return null;
+        }
+        StringBuilder cleaned = new StringBuilder();
+        for (String line : normalized.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                if (cleaned.length() > 0) {
+                    cleaned.append('\n');
+                }
+                cleaned.append(trimmed);
+            }
+        }
+        return cleaned.length() == 0 ? null : cleaned.toString();
+    }
+
+    private String escapeSrtText(String text) {
+        return text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private String escapeAssText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("\\", "\\\\")
+                .replace("{", "\\{")
+                .replace("}", "\\}")
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace("\n", "\\N");
+    }
+
+    private String formatSrtTime(double seconds) {
+        long millis = Math.max(0, Math.round(seconds * 1000));
+        long hours = millis / 3_600_000;
+        long minutes = (millis % 3_600_000) / 60_000;
+        long secs = (millis % 60_000) / 1000;
+        long ms = millis % 1000;
+        return String.format(Locale.ROOT, "%02d:%02d:%02d,%03d", hours, minutes, secs, ms);
+    }
+
+    private String formatAssTime(double seconds) {
+        long centis = Math.max(0, Math.round(seconds * 100));
+        long hours = centis / 360_000;
+        long minutes = (centis % 360_000) / 6_000;
+        long secs = (centis % 6_000) / 100;
+        long cs = centis % 100;
+        return String.format(Locale.ROOT, "%d:%02d:%02d.%02d", hours, minutes, secs, cs);
     }
 
     private boolean runFfmpegConcatDemuxer(Path listFile, Path output) throws Exception {
@@ -316,6 +478,69 @@ public class VideoComposeService {
         cmd.add("yuv420p");
         cmd.add(output.toString());
         return runFfmpeg(cmd, "filter-complex", 30);
+    }
+
+    private boolean runFfmpegPostProcess(Path input, Path assFile, Path bgmFile, Path output,
+                                         ComposeOptions options) throws Exception {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(getFfmpegExecutable());
+        cmd.add("-y");
+        cmd.add("-i");
+        cmd.add(input.toString());
+        if (bgmFile != null) {
+            cmd.add("-stream_loop");
+            cmd.add("-1");
+            cmd.add("-i");
+            cmd.add(bgmFile.toString());
+        }
+
+        boolean hasOriginalAudio = options.keepOriginalAudio() && hasAudioStream(input);
+        boolean hasBgm = bgmFile != null;
+        boolean burnSubtitles = options.burnSubtitles() && assFile != null && Files.exists(assFile);
+        List<String> filters = new ArrayList<>();
+
+        if (burnSubtitles) {
+            filters.add("[0:v]subtitles='" + escapeSubtitlePath(assFile) + "'[outv]");
+        }
+
+        String audioMap = null;
+        if (hasOriginalAudio && hasBgm) {
+            filters.add("[0:a]volume=" + ffmpegNumber(options.originalAudioVolume()) + "[a0]");
+            filters.add("[1:a]volume=" + ffmpegNumber(options.bgmVolume()) + "[a1]");
+            filters.add("[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[outa]");
+            audioMap = "[outa]";
+        } else if (hasOriginalAudio) {
+            filters.add("[0:a]volume=" + ffmpegNumber(options.originalAudioVolume()) + "[outa]");
+            audioMap = "[outa]";
+        } else if (hasBgm) {
+            filters.add("[1:a]volume=" + ffmpegNumber(options.bgmVolume()) + "[outa]");
+            audioMap = "[outa]";
+        }
+
+        if (!filters.isEmpty()) {
+            cmd.add("-filter_complex");
+            cmd.add(String.join(";", filters));
+        }
+
+        cmd.add("-map");
+        cmd.add(burnSubtitles ? "[outv]" : "0:v");
+        if (audioMap != null) {
+            cmd.add("-map");
+            cmd.add(audioMap);
+            cmd.add("-c:a");
+            cmd.add("aac");
+            cmd.add("-shortest");
+        } else {
+            cmd.add("-an");
+        }
+        cmd.add("-c:v");
+        cmd.add("libx264");
+        cmd.add("-preset");
+        cmd.add("veryfast");
+        cmd.add("-pix_fmt");
+        cmd.add("yuv420p");
+        cmd.add(output.toString());
+        return runFfmpeg(cmd, "post-process", 30);
     }
 
     private boolean runFfmpeg(List<String> cmd, String tag, int timeoutMinutes) throws Exception {
@@ -409,13 +634,14 @@ public class VideoComposeService {
     private void markFailed(Long episodeId, String msg) {
         try {
             String trimmed = msg == null ? "未知错误" : (msg.length() > 1000 ? msg.substring(0, 1000) : msg);
-            StoryboardEpisode update = new StoryboardEpisode();
-            update.setId(episodeId);
-            update.setComposeStatus(STATUS_FAILED);
-            update.setComposeErrorMsg(trimmed);
-            update.setComposedVideoUrl(null);
-            update.setComposedAt(null);
-            episodeMapper.updateById(update);
+            episodeMapper.update(null, new UpdateWrapper<StoryboardEpisode>()
+                    .eq("id", episodeId)
+                    .set("compose_status", STATUS_FAILED)
+                    .set("compose_error_msg", trimmed)
+                    .set("composed_video_url", null)
+                    .set("subtitle_srt_url", null)
+                    .set("subtitle_ass_url", null)
+                    .set("composed_at", null));
         } catch (Exception e) {
             log.error("[VideoCompose] 更新失败状态异常", e);
         }
@@ -660,5 +886,121 @@ public class VideoComposeService {
     private boolean isAbsoluteHttpUrl(String url) {
         String lower = url.toLowerCase(Locale.ROOT);
         return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+    private String resolveMediaExtension(String url, String defaultExt) {
+        String fallback = normalizeExtension(defaultExt);
+        if (!StringUtils.hasText(url)) {
+            return "." + fallback;
+        }
+        String path = url;
+        try {
+            URI uri = URI.create(url);
+            if (StringUtils.hasText(uri.getPath())) {
+                path = uri.getPath();
+            }
+        } catch (Exception ignored) {
+            int queryIndex = path.indexOf('?');
+            if (queryIndex >= 0) {
+                path = path.substring(0, queryIndex);
+            }
+            int fragmentIndex = path.indexOf('#');
+            if (fragmentIndex >= 0) {
+                path = path.substring(0, fragmentIndex);
+            }
+        }
+        int slashIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        int dotIndex = path.lastIndexOf('.');
+        if (dotIndex <= slashIndex || dotIndex >= path.length() - 1) {
+            return "." + fallback;
+        }
+        String ext = normalizeExtension(path.substring(dotIndex + 1));
+        if (!StringUtils.hasText(ext) || ext.length() > 8) {
+            return "." + fallback;
+        }
+        return "." + ext;
+    }
+
+    private String normalizeExtension(String ext) {
+        String value = StringUtils.hasText(ext) ? ext.trim() : "bin";
+        if (value.startsWith(".")) {
+            value = value.substring(1);
+        }
+        value = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return StringUtils.hasText(value) ? value : "bin";
+    }
+
+    private boolean isDefaultVolume(double volume) {
+        return Math.abs(volume - DEFAULT_ORIGINAL_AUDIO_VOLUME) < 0.0001;
+    }
+
+    private String ffmpegNumber(double value) {
+        double safeValue = Double.isFinite(value) ? value : DEFAULT_ORIGINAL_AUDIO_VOLUME;
+        return BigDecimal.valueOf(safeValue)
+                .setScale(3, RoundingMode.HALF_UP)
+                .stripTrailingZeros()
+                .toPlainString();
+    }
+
+    private String escapeSubtitlePath(Path assFile) {
+        String path = assFile.toAbsolutePath().normalize().toString().replace('\\', '/');
+        return path.replace(":", "\\:").replace("'", "\\'");
+    }
+
+    public static record ComposeOptions(boolean generateSubtitleFiles,
+                                        boolean burnSubtitles,
+                                        boolean keepOriginalAudio,
+                                        double originalAudioVolume,
+                                        String bgmUrl,
+                                        double bgmVolume) {
+        public static ComposeOptions defaults() {
+            return new ComposeOptions(
+                    true,
+                    false,
+                    true,
+                    DEFAULT_ORIGINAL_AUDIO_VOLUME,
+                    null,
+                    DEFAULT_BGM_VOLUME
+            );
+        }
+
+        public static ComposeOptions from(ComposeEpisodeVideoReqVO reqVO) {
+            ComposeOptions defaults = defaults();
+            if (reqVO == null) {
+                return defaults;
+            }
+            return new ComposeOptions(
+                    boolOrDefault(reqVO.getGenerateSubtitleFiles(), defaults.generateSubtitleFiles()),
+                    boolOrDefault(reqVO.getBurnSubtitles(), defaults.burnSubtitles()),
+                    boolOrDefault(reqVO.getKeepOriginalAudio(), defaults.keepOriginalAudio()),
+                    clampVolume(reqVO.getOriginalAudioVolume(), defaults.originalAudioVolume()),
+                    trimToNull(reqVO.getBgmUrl()),
+                    clampVolume(reqVO.getBgmVolume(), defaults.bgmVolume())
+            );
+        }
+
+        private static boolean boolOrDefault(Boolean value, boolean fallback) {
+            return value != null ? value : fallback;
+        }
+
+        private static double clampVolume(Double value, double fallback) {
+            if (value == null || !Double.isFinite(value)) {
+                return fallback;
+            }
+            return Math.max(0, Math.min(MAX_AUDIO_VOLUME, value));
+        }
+
+        private static String trimToNull(String value) {
+            if (!StringUtils.hasText(value)) {
+                return null;
+            }
+            return value.trim();
+        }
+    }
+
+    private record ComposeClip(StoryboardItem item, String videoUrl) {
+    }
+
+    private record SubtitleFiles(Path srtFile, Path assFile, boolean hasSubtitle) {
     }
 }

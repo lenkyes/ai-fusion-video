@@ -11,7 +11,6 @@ import com.stonewu.fusion.service.task.TaskStreamService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -131,13 +130,7 @@ class VideoComposeServiceTests {
         String taskId = videoComposeService.submitCompose(11L, 99L);
 
         assertThat(taskId).isEqualTo("task-1");
-        ArgumentCaptor<StoryboardEpisode> captor = ArgumentCaptor.forClass(StoryboardEpisode.class);
-        verify(episodeMapper).updateById(captor.capture());
-        assertThat(captor.getValue().getId()).isEqualTo(11L);
-        assertThat(captor.getValue().getComposeStatus()).isEqualTo(VideoComposeService.STATUS_FAILED);
-        assertThat(captor.getValue().getComposeErrorMsg()).contains("合成队列繁忙");
-        assertThat(captor.getValue().getComposedVideoUrl()).isNull();
-        assertThat(captor.getValue().getComposedAt()).isNull();
+        verify(episodeMapper, org.mockito.Mockito.times(2)).update(eq(null), any(UpdateWrapper.class));
         verify(taskStreamService).fail("task-1", "合成队列繁忙，请稍后重试");
     }
 

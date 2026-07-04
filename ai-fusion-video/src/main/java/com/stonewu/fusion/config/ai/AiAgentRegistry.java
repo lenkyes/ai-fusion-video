@@ -502,6 +502,7 @@ public class AiAgentRegistry {
                                                                                 - storyboardItemId: 分镜条目ID（数字，必传）
                                                                                 - projectId: 项目ID（数字，必传）
                                                                                 - promptOnly: true/false（仅生成提示词时传 true）
+                                                                                - generateAudio: true/false（默认 true；上下文提供时原样传递）
                                                                                 - forceRegenerate: true/false（上下文有 forceRegenerate=true、overwriteExistingVideo=true，或用户明确要求重新生成/覆盖时传 true）
                                                                                 - generationRequestId: 本次用户提交的唯一请求ID（若上下文提供则原样传递，禁止编造）
                                                                                 - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
@@ -514,6 +515,7 @@ public class AiAgentRegistry {
                                                                                 storyboardItemId: {storyboardItemId}
                                                                                 projectId: {projectId}
                                                                                 promptOnly: false
+                                                                                generateAudio: true
                                                                                 forceRegenerate: false
                                                                                 generationRequestId: {generationRequestId 或留空}
                                                                                 consistencyContext:

@@ -2,6 +2,7 @@ package com.stonewu.fusion.controller.storyboard;
 
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.common.CommonResult;
+import com.stonewu.fusion.controller.storyboard.vo.ComposeEpisodeVideoReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardCreateReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardEpisodeCreateReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardEpisodeUpdateReqVO;
@@ -121,9 +122,11 @@ public class StoryboardController {
 
     @Operation(summary = "提交本集合成视频任务（异步）")
     @PostMapping("/episode/{id}/compose-video")
-    public CommonResult<String> composeEpisodeVideo(@PathVariable Long id) {
+    public CommonResult<String> composeEpisodeVideo(@PathVariable Long id,
+                                                    @RequestBody(required = false) ComposeEpisodeVideoReqVO reqVO) {
         Long userId = requireCurrentUserId();
-        return CommonResult.success(videoComposeService.submitCompose(id, userId));
+        return CommonResult.success(videoComposeService.submitCompose(id, userId,
+                VideoComposeService.ComposeOptions.from(reqVO)));
     }
 
     // ========== 分镜场次 ==========

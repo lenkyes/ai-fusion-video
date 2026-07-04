@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Video, X, ImageIcon, Check, Film, FileText } from "lucide-react";
+import { Video, X, ImageIcon, Check, Film, FileText, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
 import type { StoryboardItem } from "@/lib/api/storyboard";
@@ -11,7 +11,10 @@ interface VideoGenDialogProps {
   onClose: () => void;
   /** 分镜条目列表 */
   items: StoryboardItem[];
-  onConfirm: (selectedItemIds: number[], promptOnly?: boolean) => void;
+  onConfirm: (
+    selectedItemIds: number[],
+    options?: { promptOnly?: boolean; generateAudio?: boolean }
+  ) => void;
 }
 
 export function VideoGenDialog({
@@ -34,6 +37,7 @@ export function VideoGenDialog({
     [items]
   );
   const [selectedOverride, setSelectedOverride] = useState<Set<number> | null>(null);
+  const [generateAudio, setGenerateAudio] = useState(true);
   const selected = selectedOverride ?? defaultSelected;
 
   if (!open) return null;
@@ -56,7 +60,7 @@ export function VideoGenDialog({
   };
 
   const handleConfirm = (promptOnly?: boolean) => {
-    onConfirm(Array.from(selected), promptOnly);
+    onConfirm(Array.from(selected), { promptOnly, generateAudio });
     onClose();
   };
 
@@ -121,6 +125,21 @@ export function VideoGenDialog({
         )}
 
         {/* 镜头列表 */}
+        {items.length > 0 && (
+          <label className="px-5 py-2.5 border-b border-border/10 flex items-center justify-between gap-3 text-xs">
+            <span className="flex items-center gap-1.5 text-foreground">
+              <Volume2 className="h-3.5 w-3.5 text-purple-400" />
+              生成原生配音
+            </span>
+            <input
+              type="checkbox"
+              checked={generateAudio}
+              onChange={(event) => setGenerateAudio(event.target.checked)}
+              className="h-4 w-4 accent-purple-500"
+            />
+          </label>
+        )}
+
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0">
           {items.length === 0 ? (
             <div className="text-center py-8">

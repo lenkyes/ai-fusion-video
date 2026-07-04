@@ -32,6 +32,8 @@ export interface StoryboardEpisode {
   sortOrder: number;
   status: number;
   composedVideoUrl: string | null;
+  subtitleSrtUrl: string | null;
+  subtitleAssUrl: string | null;
   composeStatus: EpisodeComposeStatus;
   composeErrorMsg: string | null;
   composedAt: string | null;
@@ -130,7 +132,17 @@ export interface StoryboardEpisodeUpdateReq {
   sortOrder?: number;
 }
 
-/** 创建分镜场次请求 */
+/** Submit episode compose options */
+export interface ComposeEpisodeVideoReq {
+  generateSubtitleFiles?: boolean;
+  burnSubtitles?: boolean;
+  keepOriginalAudio?: boolean;
+  originalAudioVolume?: number;
+  bgmUrl?: string;
+  bgmVolume?: number;
+}
+
+/** Create storyboard scene request */
 export interface StoryboardSceneCreateReq {
   episodeId: number;
   storyboardId: number;
@@ -246,8 +258,8 @@ export const storyboardApi = {
     http.delete<never, boolean>(`/api/storyboard/episode/${id}`),
 
   /** 提交本集合成视频任务（异步） */
-  composeEpisodeVideo: (episodeId: number) =>
-    http.post<never, string>(`/api/storyboard/episode/${episodeId}/compose-video`),
+  composeEpisodeVideo: (episodeId: number, options?: ComposeEpisodeVideoReq) =>
+    http.post<never, string>(`/api/storyboard/episode/${episodeId}/compose-video`, options ?? {}),
 
   // ========== 分镜场次 ==========
 
