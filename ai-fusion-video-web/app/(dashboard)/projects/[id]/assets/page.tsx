@@ -10,6 +10,7 @@ import {
   Loader2,
   Trash2,
   X,
+  Sparkles,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,14 @@ const typeLabelMap: Record<string, string> = {
   prop: "道具",
 };
 
+const emptyImageSummary = {
+  totalItems: 0,
+  pendingItems: 0,
+  pendingAssets: 0,
+  loading: true,
+  loaded: false,
+};
+
 export default function ProjectAssetsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -65,10 +74,22 @@ export default function ProjectAssetsPage() {
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [imageSummary, setImageSummary] = useState(emptyImageSummary);
+  const [startingBatchGen, setStartingBatchGen] = useState(false);
   const [activeType, setActiveType] = useState<string | undefined>(undefined);
   const [search, setSearch] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const addPipeline = usePipelineStore((s) => s.addPipeline);
+  const setNotificationOpen = usePipelineStore((s) => s.setNotificationOpen);
+  const hasRunningBatchImageTask = usePipelineStore((s) =>
+    s.tasks.some(
+      (task) =>
+        task.projectId === projectId &&
+        task.status === "running" &&
+        task.label.startsWith("资产一键生图")
+    )
+  );
 
   // 选中资产
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -90,7 +111,37 @@ export default function ProjectAssetsPage() {
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const fetchImageSummary = useCallback(async () => {
+    setImageSummary((prev) => ({ ...prev, loading: true }));
+    try {
+      const list = await assetApi.listWithItems(projectId);
+      let totalItems = 0;
+      let pendingItems = 0;
+      const pendingAssetIds = new Set<number>();
+
+      for (const asset of list) {
+        for (const item of asset.items ?? []) {
+          totalItems += 1;
+          if (!item.imageUrl?.trim()) {
+            pendingItems += 1;
+            pendingAssetIds.add(asset.id);
+          }
+        }
+      }
+
+      setImageSummary({
+        totalItems,
+        pendingItems,
+        pendingAssets: pendingAssetIds.size,
+        loading: false,
+        loaded: true,
+      });
+    } catch (err) {
+      console.error("统计待生图资产失败:", err);
+      setImageSummary((prev) => ({ ...prev, loading: false, loaded: false }));
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -102,6 +153,10 @@ export default function ProjectAssetsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeType, search]);
 
+  useEffect(() => {
+    fetchImageSummary();
+  }, [fetchImageSummary]);
+
   // AI 工具执行后自动刷新
   const assetsInvalidation = usePipelineStore((s) => s.invalidation.assets);
   const assetsInvRef = useRef(assetsInvalidation);
@@ -109,8 +164,9 @@ export default function ProjectAssetsPage() {
     if (assetsInvRef.current !== assetsInvalidation) {
       assetsInvRef.current = assetsInvalidation;
       fetchData(activeType, search);
+      fetchImageSummary();
     }
-  }, [assetsInvalidation, activeType, search, fetchData]);
+  }, [assetsInvalidation, activeType, search, fetchData, fetchImageSummary]);
 
   // URL highlight 参数驱动自动选中
   const highlightHandled = useRef(false);
@@ -131,9 +187,47 @@ export default function ProjectAssetsPage() {
       await assetApi.delete(id);
       if (selectedAsset?.id === id) setSelectedAsset(null);
       await fetchData(activeType, search);
+      await fetchImageSummary();
     } catch (err) {
       console.error("删除资产失败:", err);
     }
+  };
+
+  const handleBatchGenerateImages = () => {
+    if (
+      startingBatchGen ||
+      hasRunningBatchImageTask ||
+      imageSummary.loading ||
+      !imageSummary.loaded ||
+      imageSummary.pendingItems === 0
+    ) {
+      return;
+    }
+
+    setStartingBatchGen(true);
+    addPipeline({
+      label: `资产一键生图 (${imageSummary.pendingItems} 张)`,
+      projectId,
+      request: {
+        agentType: "asset_image_gen",
+        category: "asset_image_batch",
+        title: "资产一键生图",
+        projectId,
+        enableParallelTools: true,
+        message: "请为当前项目资产中所有尚未生成图片的子资产批量生成图片，已有图片不要覆盖。",
+        context: {
+          batchMode: "missing_project_asset_images",
+          onlyMissingImages: true,
+          pendingItemCount: imageSummary.pendingItems,
+        },
+      },
+      onComplete: () => {
+        fetchData(activeType, search);
+        fetchImageSummary();
+      },
+    });
+    setNotificationOpen(true);
+    setStartingBatchGen(false);
   };
 
   const handleOpenCreate = () => {
@@ -175,16 +269,60 @@ export default function ProjectAssetsPage() {
               {assets.length} 个
             </span>
           </h2>
-          <button
-            onClick={handleOpenCreate}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-              "bg-primary text-primary-foreground hover:bg-primary/90"
-            )}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            新建
-          </button>
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "hidden sm:flex items-center gap-1.5 rounded-lg border border-border/25 px-2.5 py-1.5",
+                "bg-card/45 text-xs text-muted-foreground"
+              )}
+            >
+              {imageSummary.loading ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  统计中
+                </>
+              ) : (
+                <>待生图 {imageSummary.pendingItems} 张</>
+              )}
+            </span>
+            <button
+              onClick={handleBatchGenerateImages}
+              disabled={
+                startingBatchGen ||
+                hasRunningBatchImageTask ||
+                imageSummary.loading ||
+                !imageSummary.loaded ||
+                imageSummary.pendingItems === 0
+              }
+              title={
+                imageSummary.pendingItems > 0
+                  ? `生成 ${imageSummary.pendingAssets} 个资产下的 ${imageSummary.pendingItems} 张缺失图片`
+                  : "当前没有待生成图片"
+              }
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                "border border-purple-500/20 bg-purple-500/10 text-purple-300 hover:bg-purple-500/15",
+                "disabled:opacity-45 disabled:pointer-events-none"
+              )}
+            >
+              {startingBatchGen || hasRunningBatchImageTask ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              一键生图
+            </button>
+            <button
+              onClick={handleOpenCreate}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                "bg-primary text-primary-foreground hover:bg-primary/90"
+              )}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新建
+            </button>
+          </div>
         </motion.div>
 
         {/* 类型过滤标签 + 搜索 */}
@@ -343,10 +481,12 @@ export default function ProjectAssetsPage() {
             onClose={() => setIsCreating(false)}
             onSaved={async () => {
               await fetchData(activeType);
+              await fetchImageSummary();
             }}
             onCreated={async (created) => {
               setIsCreating(false);
               await fetchData(activeType);
+              await fetchImageSummary();
               setSelectedAsset(created);
             }}
           />
@@ -355,10 +495,14 @@ export default function ProjectAssetsPage() {
             key={selectedAsset.id}
             asset={selectedAsset}
             onClose={() => setSelectedAsset(null)}
-            onSaved={() => fetchData(activeType)}
+            onSaved={() => {
+              fetchData(activeType);
+              fetchImageSummary();
+            }}
             onDeleted={() => {
               setSelectedAsset(null);
               fetchData(activeType);
+              fetchImageSummary();
             }}
           />
         ) : null}
