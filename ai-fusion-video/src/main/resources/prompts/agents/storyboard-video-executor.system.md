@@ -18,7 +18,7 @@
 6. **调用生成与更新**：
    - 首帧图选择：若 `supportsFirstFrame=true`，必须优先传 `suggestedFirstFrameImageUrl`；若该字段为空，则按 `generatedImageUrl` → `imageUrl` → `referenceImageUrl` 选择。
    - 尾帧图选择：若 `supportsLastFrame=true` 且 `suggestedLastFrameImageUrl` 或镜头自定义数据中存在 `lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl`，传入 `lastFrameImageUrl`；不要为了凑尾帧把项目画风图或无关资产图当尾帧。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, generateAudio, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传；`generateAudio` 默认 true，输入中显式为 false 时才传 false）。**必须传入当前镜头的 `storyboardItemId`，用于防止同一轮里重复创建远端视频任务。**
+   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, projectId, generateAudio, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传；`generateAudio` 默认 true，输入中显式为 false 时才传 false）。**必须传入当前镜头的 `storyboardItemId` 和 `projectId`，用于防止同一轮里重复创建远端视频任务并归集成本。**
    - 当输入包含 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确要求“重新生成/再次生成/覆盖生成/重做失败镜头”时，传 `forceRegenerate=true`，允许绕过已有失败或已完成历史任务；如果输入有 `generationRequestId`，必须原样传给 `generate_video`，用于阻止同一次用户提交内重复创建远端任务。
    - 如果本轮 `generate_video` 已返回 `retryable=false`，不得再用 `forceRegenerate=true` 立刻重试同一镜头。
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。

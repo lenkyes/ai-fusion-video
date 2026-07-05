@@ -3,6 +3,7 @@ package com.stonewu.fusion.service.ai.tool;
 import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.entity.generation.VideoItem;
 import com.stonewu.fusion.entity.generation.VideoTask;
+import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
@@ -46,6 +47,14 @@ class GenerateVideoToolExecutorTests {
                 .build();
         when(aiModelService.getDefaultByType(3)).thenReturn(model);
         when(strategyRouter.supports(model)).thenReturn(true);
+        when(storyboardService.getItemById(3307L)).thenReturn(StoryboardItem.builder()
+                .id(3307L)
+                .storyboardId(220L)
+                .build());
+        when(storyboardService.getById(220L)).thenReturn(Storyboard.builder()
+                .id(220L)
+                .projectId(100L)
+                .build());
 
         VideoTask completedTask = VideoTask.builder().id(91L).taskId("task-91").status(2).build();
         when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(12345L))).thenReturn(completedTask);
@@ -71,6 +80,7 @@ class GenerateVideoToolExecutorTests {
         ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
         verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(12345L));
         assertThat(taskCaptor.getValue().getModelId()).isEqualTo(31L);
+        assertThat(taskCaptor.getValue().getProjectId()).isEqualTo(100L);
         assertThat(taskCaptor.getValue().getCategory()).isEqualTo("storyboard_item:3307");
         assertThat(taskCaptor.getValue().getGenerateAudio()).isTrue();
         assertThat(result).contains("\"status\":\"success\"");

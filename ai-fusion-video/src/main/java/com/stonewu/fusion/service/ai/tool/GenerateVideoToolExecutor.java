@@ -8,6 +8,7 @@ import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.entity.generation.VideoItem;
 import com.stonewu.fusion.entity.generation.VideoTask;
+import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
@@ -144,6 +145,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .set("storyboardItemId", JSONUtil.createObj()
                         .set("type", "integer")
                         .set("description", "分镜镜头ID；批量分镜生成时必须传，用于幂等防重复提交远端视频任务"))
+                    .set("projectId", JSONUtil.createObj()
+                        .set("type", "integer")
+                        .set("description", "项目ID，用于成本统计和生成任务归属；分镜生成时建议传"))
                     .set("forceRegenerate", JSONUtil.createObj()
                         .set("type", "boolean")
                         .set("description", "用户明确要求重新生成/覆盖已有失败或成功任务时传 true；同一轮失败自动重试不要传 true"))
@@ -190,6 +194,10 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             Boolean cameraFixed = params.getBool("cameraFixed", false);
             Boolean generateAudio = params.getBool("generateAudio", true);
             Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
+            Long projectId = positiveLong(params.getLong("projectId"));
+            if (projectId == null) {
+                projectId = resolveProjectIdFromStoryboardItem(storyboardItemId);
+            }
             boolean forceRegenerate = params.getBool("forceRegenerate",
                     params.getBool("overwriteExistingVideo", false));
             String generationRequestId = params.getStr("generationRequestId");
@@ -262,6 +270,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .category(idempotencyCategory)
                     .count(1)
                     .userId(userId)
+                    .projectId(projectId)
                     .build();
 
             generationModelCapabilityService.validateVideoTask(model, task);
@@ -491,6 +500,24 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     private String storyboardItemCategory(Long storyboardItemId) {
         return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
+    }
+
+    private Long resolveProjectIdFromStoryboardItem(Long storyboardItemId) {
+        if (storyboardItemId == null) {
+            return null;
+        }
+        try {
+            StoryboardItem item = storyboardService.getItemById(storyboardItemId);
+            if (item == null || item.getStoryboardId() == null) {
+                return null;
+            }
+            Storyboard storyboard = storyboardService.getById(item.getStoryboardId());
+            return storyboard != null ? storyboard.getProjectId() : null;
+        } catch (Exception e) {
+            log.warn("[generate_video] 读取分镜项目ID失败: storyboardItemId={}, reason={}",
+                    storyboardItemId, e.getMessage());
+            return null;
+        }
     }
 
     private String resolveIdempotencyCategory(String storyboardCategory, boolean forceRegenerate,

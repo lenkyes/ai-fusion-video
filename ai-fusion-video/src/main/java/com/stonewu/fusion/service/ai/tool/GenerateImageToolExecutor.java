@@ -6,12 +6,15 @@ import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
+import com.stonewu.fusion.entity.storyboard.Storyboard;
+import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.AiModelService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.ImageGenerationService;
 import com.stonewu.fusion.service.generation.consumer.ImageGenerationConsumer;
+import com.stonewu.fusion.service.storyboard.StoryboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -41,6 +44,7 @@ public class GenerateImageToolExecutor implements ToolExecutor {
     private final ImageGenerationService imageGenerationService;
     private final ImageGenerationConsumer imageGenerationConsumer;
     private final GenerationModelCapabilityService generationModelCapabilityService;
+    private final StoryboardService storyboardService;
 
     @Override
     public String getToolName() {
@@ -103,7 +107,16 @@ public class GenerateImageToolExecutor implements ToolExecutor {
                     .set("imageUrls", JSONUtil.createObj()
                         .set("type", "array")
                         .set("items", JSONUtil.createObj().set("type", "string"))
-                        .set("description", imageUrlDescription)))
+                        .set("description", imageUrlDescription))
+                    .set("projectId", JSONUtil.createObj()
+                        .set("type", "integer")
+                        .set("description", "项目ID，用于成本统计和生成任务归属"))
+                    .set("storyboardItemId", JSONUtil.createObj()
+                        .set("type", "integer")
+                        .set("description", "分镜镜头ID；传入后会自动写入 storyboard_item 分类"))
+                    .set("category", JSONUtil.createObj()
+                        .set("type", "string")
+                        .set("description", "任务分类标签，例如 asset_item:123 或 storyboard_item:456")))
                 .set("required", JSONUtil.parseArray("[\"prompt\"]"))
                 .toString();
     }
@@ -124,6 +137,15 @@ public class GenerateImageToolExecutor implements ToolExecutor {
 
             int width = params.getInt("width", 0);
             int height = params.getInt("height", 0);
+            Long projectId = positiveLong(params.getLong("projectId"));
+            Long storyboardItemId = positiveLong(params.getLong("storyboardItemId"));
+            if (projectId == null) {
+                projectId = resolveProjectIdFromStoryboardItem(storyboardItemId);
+            }
+            String category = StrUtil.trim(params.getStr("category"));
+            if (StrUtil.isBlank(category)) {
+                category = storyboardItemCategory(storyboardItemId);
+            }
 
             // 参考图片（图生图）
             String refImageUrls = null;
@@ -145,6 +167,8 @@ public class GenerateImageToolExecutor implements ToolExecutor {
                     .modelId(model.getId())
                     .count(1)
                     .userId(context.getUserId())
+                    .projectId(projectId)
+                    .category(category)
                     .build();
 
                 generationModelCapabilityService.validateImageTask(model, task);
@@ -210,6 +234,32 @@ public class GenerateImageToolExecutor implements ToolExecutor {
     private String describeCurrentModelCapability() {
         AiModel model = resolvePreferredModelOrNull();
         return generationModelCapabilityService.describeImageCapability(model);
+    }
+
+    private Long positiveLong(Long value) {
+        return value != null && value > 0 ? value : null;
+    }
+
+    private String storyboardItemCategory(Long storyboardItemId) {
+        return storyboardItemId != null ? "storyboard_item:" + storyboardItemId : null;
+    }
+
+    private Long resolveProjectIdFromStoryboardItem(Long storyboardItemId) {
+        if (storyboardItemId == null) {
+            return null;
+        }
+        try {
+            StoryboardItem item = storyboardService.getItemById(storyboardItemId);
+            if (item == null || item.getStoryboardId() == null) {
+                return null;
+            }
+            Storyboard storyboard = storyboardService.getById(item.getStoryboardId());
+            return storyboard != null ? storyboard.getProjectId() : null;
+        } catch (Exception e) {
+            log.warn("[generate_image] 读取分镜项目ID失败: storyboardItemId={}, reason={}",
+                    storyboardItemId, e.getMessage());
+            return null;
+        }
     }
 
     private String errorResult(String message) {

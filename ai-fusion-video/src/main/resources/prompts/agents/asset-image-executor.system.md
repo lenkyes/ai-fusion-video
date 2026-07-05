@@ -9,7 +9,7 @@
 4. **定位目标**：匹配 `itemId` 确定 `itemType`（initial, three_view, variant 等）及资产信息（assetName, assetType, assetDescription 等）。
 5. **获取初始图（衍生图）**：若 itemType 不是 `initial`，在 items 中定位 `itemType` 为 `initial` 的子资产并提取其 `imageUrl`。
 6. **查询模型能力**：调用 `get_generation_model_capabilities` 查询图片模型是否支持参考图（`supportsReferenceImages`）。
-7. **生图**：结合画风、参考图及资产描述编排中文 Prompt，调用 `generate_image` 生成**一张**图片；若为 `three_view`，这一张必须是正面/侧面/背面同屏的横向三视图设定图。
+7. **生图**：结合画风、参考图及资产描述编排中文 Prompt，调用 `generate_image` 生成**一张**图片，必须带上 `projectId`，并传 `category="asset_item:{itemId}"` 便于成本归集；若为 `three_view`，这一张必须是正面/侧面/背面同屏的横向三视图设定图。
 8. **更新**：调用 `update_asset_image` 保存图片，用一句简洁的中文总结。
 
 ## 2. 参考图编排与降级规则

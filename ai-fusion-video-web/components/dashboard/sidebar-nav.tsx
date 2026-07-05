@@ -46,6 +46,7 @@ const projectDetailItems: SidebarItem[] = [
   { key: "scripts", label: "剧本", icon: BookOpen, href: "/scripts", iconColor: "text-purple-400" },
   { key: "storyboards", label: "分镜", icon: Film, href: "/storyboards", iconColor: "text-cyan-400" },
   { key: "assets", label: "资产", icon: Images, href: "/assets", iconColor: "text-orange-400" },
+  { key: "costs", label: "成本", icon: BarChart3, href: "/costs", iconColor: "text-emerald-400" },
   // { key: "members", label: "成员", icon: Users, href: "/members", iconColor: "text-green-400" },
   { key: "settings", label: "设置", icon: Settings, href: "/settings", iconColor: "text-rose-400" },
 ];

@@ -6,3 +6,15 @@ docker compose up -d frontend
 
 # 3. 最后启动 nginx
 docker compose up -d nginx
+
+
+# scripts脚本命令
+# 同时更新前后端，默认就是 both
+.\scripts\remote-update.ps1
+.\scripts\remote-update.ps1 -UpdateMode both
+
+# 只更新后端
+.\scripts\remote-update.ps1 -UpdateMode backend
+
+# 只更新前端
+.\scripts\remote-update.ps1 -UpdateMode frontend
