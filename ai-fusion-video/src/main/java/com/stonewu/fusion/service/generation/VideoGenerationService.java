@@ -90,6 +90,12 @@ public class VideoGenerationService {
         return itemMapper.selectList(new LambdaQueryWrapper<VideoItem>().eq(VideoItem::getTaskId, taskId));
     }
 
+    public VideoItem getItemById(Long id) {
+        VideoItem item = itemMapper.selectById(id);
+        if (item == null) throw new BusinessException("生成视频条目不存在: " + id);
+        return item;
+    }
+
     @CacheEvict(value = "videoItems", allEntries = true)
     @Transactional
     public VideoItem createItem(VideoItem item) {
@@ -216,5 +222,20 @@ public class VideoGenerationService {
                 .orderByDesc(VideoTask::getCreateTime)
                 .last("LIMIT 1");
         return taskMapper.selectOne(wrapper);
+    }
+
+    public List<VideoTask> listByCategoryFamily(String category, Long userId, Long modelId) {
+        if (StrUtil.isBlank(category)) {
+            return List.of();
+        }
+        String scopedPrefix = category + ":";
+        return taskMapper.selectList(new LambdaQueryWrapper<VideoTask>()
+                .and(w -> w.eq(VideoTask::getCategory, category)
+                        .or()
+                        .likeRight(VideoTask::getCategory, scopedPrefix))
+                .eq(userId != null, VideoTask::getUserId, userId)
+                .eq(modelId != null, VideoTask::getModelId, modelId)
+                .orderByDesc(VideoTask::getCreateTime)
+                .orderByDesc(VideoTask::getId));
     }
 }

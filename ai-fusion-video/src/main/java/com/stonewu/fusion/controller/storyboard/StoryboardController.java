@@ -3,6 +3,7 @@ package com.stonewu.fusion.controller.storyboard;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.common.CommonResult;
 import com.stonewu.fusion.controller.storyboard.vo.ComposeEpisodeVideoReqVO;
+import com.stonewu.fusion.controller.storyboard.vo.EvaluateStoryboardVideoQualityReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardCreateReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardEpisodeCreateReqVO;
 import com.stonewu.fusion.controller.storyboard.vo.StoryboardEpisodeUpdateReqVO;
@@ -17,7 +18,9 @@ import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.entity.storyboard.StoryboardScene;
+import com.stonewu.fusion.entity.storyboard.StoryboardVideoQuality;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
+import com.stonewu.fusion.service.storyboard.StoryboardVideoQualityService;
 import com.stonewu.fusion.service.storyboard.VideoComposeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,6 +52,7 @@ public class StoryboardController {
 
     private final StoryboardService storyboardService;
     private final VideoComposeService videoComposeService;
+    private final StoryboardVideoQualityService storyboardVideoQualityService;
 
     // ========== 分镜脚本 ==========
 
@@ -233,6 +237,30 @@ public class StoryboardController {
                 }
             }
         }
+    }
+
+    @Operation(summary = "获取分镜镜头视频质检结果")
+    @GetMapping("/item/{id}/video-quality")
+    public CommonResult<List<StoryboardVideoQuality>> listItemVideoQuality(@PathVariable Long id) {
+        return CommonResult.success(storyboardVideoQualityService.listByStoryboardItem(id));
+    }
+
+    @Operation(summary = "执行分镜镜头视频质检评分")
+    @PostMapping("/item/{id}/video-quality/evaluate")
+    public CommonResult<StoryboardVideoQualityService.QualityReviewResult> evaluateItemVideoQuality(
+            @PathVariable Long id,
+            @RequestBody(required = false) EvaluateStoryboardVideoQualityReqVO reqVO) {
+        Long userId = requireCurrentUserId();
+        boolean autoSelect = reqVO != null && Boolean.TRUE.equals(reqVO.getAutoSelect());
+        Integer minScore = reqVO != null ? reqVO.getMinScore() : null;
+        return CommonResult.success(storyboardVideoQualityService.evaluateStoryboardItem(id, userId, autoSelect, minScore));
+    }
+
+    @Operation(summary = "选用分镜镜头视频候选版本")
+    @PostMapping("/item/{id}/video-quality/{qualityId}/select")
+    public CommonResult<StoryboardVideoQuality> selectItemVideoCandidate(@PathVariable Long id,
+                                                                         @PathVariable Long qualityId) {
+        return CommonResult.success(storyboardVideoQualityService.selectCandidate(id, qualityId));
     }
 
     @Operation(summary = "删除分镜条目")

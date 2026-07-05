@@ -23,15 +23,27 @@ import {
   Video,
   X,
   ZoomIn,
+  ShieldCheck,
+  Gauge,
+  CheckCircle2,
+  RefreshCw,
+  PlayCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
 import { assetApi } from "@/lib/api/asset";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { SafeImage } from "@/components/ui/safe-image";
+import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
 
 import type { Asset, AssetItem } from "@/lib/api/asset";
-import type { StoryboardItem, Storyboard, StoryboardScene } from "@/lib/api/storyboard";
+import {
+  storyboardApi,
+  type StoryboardItem,
+  type Storyboard,
+  type StoryboardScene,
+  type StoryboardVideoQuality,
+} from "@/lib/api/storyboard";
 import { BatchGenDialog } from "./batch-gen-dialog";
 import type { AssetItemWithInfo, SelectedAssetItem } from "./batch-gen-dialog";
 import { VideoGenDialog } from "./video-gen-dialog";
@@ -488,6 +500,274 @@ function AssetItemGroup({
   );
 }
 
+function scoreTone(score: number | null | undefined) {
+  const value = score ?? 0;
+  if (value >= 82) {
+    return "text-emerald-600 bg-emerald-500/10 border-emerald-500/25";
+  }
+  if (value >= 62) {
+    return "text-amber-600 bg-amber-500/10 border-amber-500/25";
+  }
+  return "text-rose-600 bg-rose-500/10 border-rose-500/25";
+}
+
+function verdictLabel(verdict: string | null | undefined) {
+  if (verdict === "pass") return "通过";
+  if (verdict === "reject") return "重做";
+  return "复核";
+}
+
+function VideoQualityPanel({
+  item,
+  onItemUpdated,
+}: {
+  item: StoryboardItem;
+  onItemUpdated?: () => void | Promise<void>;
+}) {
+  const [qualities, setQualities] = useState<StoryboardVideoQuality[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [actionMode, setActionMode] = useState<"score" | "auto" | null>(null);
+  const [selectingId, setSelectingId] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
+
+  const currentVideoUrl = item.generatedVideoUrl || item.videoUrl || null;
+
+  const loadQualities = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await storyboardApi.listItemVideoQuality(item.id);
+      setQualities(list);
+      setMessage(null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "加载质检结果失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [item.id]);
+
+  useEffect(() => {
+    loadQualities();
+  }, [loadQualities]);
+
+  const handleEvaluate = async (autoSelect: boolean) => {
+    setActionMode(autoSelect ? "auto" : "score");
+    try {
+      const result = await storyboardApi.evaluateItemVideoQuality(item.id, {
+        autoSelect,
+        minScore: 75,
+      });
+      setQualities(result.candidates);
+      setMessage(result.message);
+      if (result.selectedCandidate) {
+        await onItemUpdated?.();
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "质检评分失败");
+    } finally {
+      setActionMode(null);
+    }
+  };
+
+  const handleSelect = async (quality: StoryboardVideoQuality) => {
+    setSelectingId(quality.id);
+    try {
+      const selected = await storyboardApi.selectItemVideoCandidate(item.id, quality.id);
+      setQualities((prev) =>
+        prev.map((candidate) => ({
+          ...candidate,
+          selected: candidate.id === selected.id,
+        }))
+      );
+      setMessage(`已选用候选，分数 ${selected.totalScore}`);
+      await onItemUpdated?.();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "选用候选失败");
+    } finally {
+      setSelectingId(null);
+    }
+  };
+
+  return (
+    <div className="border-t border-border/20 pt-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <ShieldCheck className="h-3 w-3" /> 视频质检
+        </h4>
+        {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => handleEvaluate(false)}
+          disabled={actionMode !== null}
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-border/30 bg-muted/20 px-2.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {actionMode === "score" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Gauge className="h-3.5 w-3.5" />
+          )}
+          评分
+        </button>
+        <button
+          type="button"
+          onClick={() => handleEvaluate(true)}
+          disabled={actionMode !== null}
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {actionMode === "auto" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
+          自动优选
+        </button>
+      </div>
+
+      {message && (
+        <p className="rounded-lg border border-border/20 bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          {message}
+        </p>
+      )}
+
+      {qualities.length === 0 && !loading ? (
+        <div className="rounded-lg border border-dashed border-border/30 px-3 py-4 text-center">
+          <Video className="mx-auto mb-2 h-5 w-5 text-muted-foreground/35" />
+          <p className="text-[11px] text-muted-foreground">暂无候选评分</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {qualities.map((quality, index) => {
+            const isSelected = quality.selected || quality.videoUrl === currentVideoUrl;
+            const resolvedVideoUrl = resolveMediaUrl(quality.videoUrl) || quality.videoUrl;
+            const scoreItems = [
+              ["角色", quality.characterConsistencyScore],
+              ["画面", quality.visualQualityScore],
+              ["运镜", quality.motionContinuityScore],
+              ["声音", quality.audioReadinessScore],
+            ] as const;
+
+            return (
+              <div
+                key={quality.id}
+                className={cn(
+                  "rounded-lg border p-2.5 space-y-2 transition-colors",
+                  isSelected
+                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    : "border-border/25 bg-muted/10"
+                )}
+              >
+                <div className="flex items-start gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewVideoUrl(quality.videoUrl)}
+                    className="h-12 w-16 shrink-0 overflow-hidden rounded-md border border-border/20 bg-muted/30 flex items-center justify-center"
+                    title="预览视频"
+                  >
+                    {quality.coverUrl ? (
+                      <SafeImage
+                        src={resolveMediaUrl(quality.coverUrl)}
+                        alt="候选封面"
+                        fallbackType="image"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <PlayCircle className="h-5 w-5 text-muted-foreground/60" />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold">#{index + 1}</span>
+                      {isSelected && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" />
+                          已选
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "ml-auto inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+                          scoreTone(quality.totalScore)
+                        )}
+                      >
+                        {quality.totalScore}
+                      </span>
+                    </div>
+                    <div className="mt-1 grid grid-cols-4 gap-1">
+                      {scoreItems.map(([label, value]) => (
+                        <div key={label} className="rounded-md bg-background/60 px-1 py-1 text-center">
+                          <p className="text-[9px] text-muted-foreground">{label}</p>
+                          <p className="text-[10px] font-semibold">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
+                      scoreTone(quality.totalScore)
+                    )}
+                  >
+                    {verdictLabel(quality.verdict)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewVideoUrl(quality.videoUrl)}
+                    className="ml-auto flex items-center gap-1 rounded-md border border-border/30 px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                  >
+                    <PlayCircle className="h-3 w-3" />
+                    预览
+                  </button>
+                  <a
+                    href={resolvedVideoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center rounded-md border border-border/30 p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                    title="打开视频"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(quality)}
+                    disabled={isSelected || selectingId === quality.id}
+                    className="flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {selectingId === quality.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3 w-3" />
+                    )}
+                    选用
+                  </button>
+                </div>
+
+                {(quality.issueSummary || quality.suggestion) && (
+                  <p className="text-[10px] leading-relaxed text-muted-foreground break-words">
+                    {quality.issueSummary || quality.suggestion}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <VideoPreviewDialog
+        open={!!previewVideoUrl}
+        title="候选视频预览"
+        videoUrl={previewVideoUrl}
+        onClose={() => setPreviewVideoUrl(null)}
+      />
+    </div>
+  );
+}
+
 // ========== 镜头详情（保留原有） ==========
 
 function ItemDetail({
@@ -495,12 +775,14 @@ function ItemDetail({
   projectId,
   assetLookup,
   onEditAssets,
+  onItemUpdated,
   onPreviewImage,
 }: {
   item: StoryboardItem;
   projectId: number;
   assetLookup?: Record<number, { item: AssetItem; asset: Asset }>;
   onEditAssets?: () => void;
+  onItemUpdated?: () => void | Promise<void>;
   onPreviewImage?: (url: string, title: string) => void;
 }) {
   const router = useRouter();
@@ -793,6 +1075,8 @@ function ItemDetail({
         </div>
       )}
 
+      <VideoQualityPanel item={item} onItemUpdated={onItemUpdated} />
+
       {/* 备注 */}
       {item.remark && (
         <div className="border-t border-border/20 pt-4">
@@ -1055,6 +1339,7 @@ export function StoryboardRefPanel({
   projectId,
   assetLookup,
   onEditAssets,
+  onItemUpdated,
   hideShotDetails = false,
 }: {
   storyboard: Storyboard;
@@ -1064,6 +1349,7 @@ export function StoryboardRefPanel({
   projectId: number;
   assetLookup?: Record<number, { item: AssetItem; asset: Asset }>;
   onEditAssets?: (item: StoryboardItem) => void;
+  onItemUpdated?: () => void | Promise<void>;
   hideShotDetails?: boolean;
 }) {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -1085,6 +1371,7 @@ export function StoryboardRefPanel({
             projectId={projectId}
             assetLookup={assetLookup}
             onEditAssets={() => onEditAssets?.(selectedItem)}
+            onItemUpdated={onItemUpdated}
             onPreviewImage={handlePreviewImage}
           />
           {activeSceneGroup && (

@@ -62,6 +62,7 @@ public class AiAgentRegistry {
                 registerAssetImageExecutorAgent();
                 registerStoryboardVideoGenAgent();
                 registerStoryboardVideoExecutorAgent();
+                registerStoryboardVideoQualityAgent();
         }
 
         // ========== 各 Agent 定义 ==========
@@ -562,6 +563,27 @@ public class AiAgentRegistry {
         /**
          * 注册 Agent 定义
          */
+        /**
+         * 注册分镜视频质检 Agent.
+         */
+        private void registerStoryboardVideoQualityAgent() {
+                register(AiAgentDefinition.builder()
+                                .type("storyboard_video_quality")
+                                .name("分镜视频质检")
+                                .toolNames(List.of(
+                                                "inspect_storyboard_video_quality",
+                                                "select_storyboard_video_candidate"))
+                                .systemPrompt(loadPrompt("storyboard-video-quality.system.md"))
+                                .instructionTemplate("""
+                                                <task_context>
+                                                <project_id>{projectId}</project_id>
+                                                <storyboard_id>{storyboardId}</storyboard_id>
+                                                </task_context>""")
+                                .defaultUserMessage("请对选中的分镜镜头视频候选进行角色一致性质检、自动评分和多版本优选。")
+                                .enableTools(1)
+                                .build());
+        }
+
         public void register(AiAgentDefinition definition) {
                 agentMap.put(definition.getType(), definition);
         }

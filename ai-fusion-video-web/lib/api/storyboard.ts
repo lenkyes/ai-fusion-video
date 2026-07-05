@@ -96,6 +96,38 @@ export interface StoryboardItem {
   updateTime: string;
 }
 
+/** 分镜镜头视频质检候选 */
+export interface StoryboardVideoQuality {
+  id: number;
+  storyboardItemId: number;
+  videoTaskId: number | null;
+  videoItemId: number | null;
+  videoUrl: string;
+  coverUrl: string | null;
+  promptSnapshot: string | null;
+  totalScore: number;
+  characterConsistencyScore: number;
+  visualQualityScore: number;
+  motionContinuityScore: number;
+  audioReadinessScore: number;
+  verdict: "pass" | "review" | "reject" | string;
+  issueSummary: string | null;
+  suggestion: string | null;
+  selected: boolean;
+  reviewerType: string | null;
+  scoreDetails: string | null;
+  createTime: string;
+  updateTime: string;
+}
+
+/** 分镜镜头视频质检结果 */
+export interface StoryboardVideoQualityReviewResult {
+  storyboardItemId: number;
+  candidates: StoryboardVideoQuality[];
+  selectedCandidate: StoryboardVideoQuality | null;
+  message: string;
+}
+
 // ========== 请求类型 ==========
 
 /** 创建分镜请求 */
@@ -212,6 +244,12 @@ export interface StoryboardItemUpdateReq {
   propIds?: string | null;
 }
 
+/** 视频质检评分请求 */
+export interface EvaluateStoryboardVideoQualityReq {
+  autoSelect?: boolean;
+  minScore?: number;
+}
+
 // ========== API ==========
 
 export const storyboardApi = {
@@ -322,6 +360,28 @@ export const storyboardApi = {
       }
     );
   },
+
+  /** 获取镜头视频质检候选 */
+  listItemVideoQuality: (itemId: number) =>
+    http.get<never, StoryboardVideoQuality[]>(
+      `/api/storyboard/item/${itemId}/video-quality`
+    ),
+
+  /** 执行镜头视频质检评分 */
+  evaluateItemVideoQuality: (
+    itemId: number,
+    options?: EvaluateStoryboardVideoQualityReq
+  ) =>
+    http.post<never, StoryboardVideoQualityReviewResult>(
+      `/api/storyboard/item/${itemId}/video-quality/evaluate`,
+      options ?? {}
+    ),
+
+  /** 选用镜头视频候选 */
+  selectItemVideoCandidate: (itemId: number, qualityId: number) =>
+    http.post<never, StoryboardVideoQuality>(
+      `/api/storyboard/item/${itemId}/video-quality/${qualityId}/select`
+    ),
 
   /** 删除分镜条目 */
   deleteItem: (id: number) =>

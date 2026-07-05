@@ -1241,6 +1241,7 @@ export default function StoryboardTabPage() {
                     setEditingItem(item);
                     setEditAssetsOpen(true);
                   }}
+                  onItemUpdated={refreshStoryboardData}
                   hideShotDetails={viewMode === "table"}
                 />
               </SheetContent>
@@ -1366,6 +1367,7 @@ export default function StoryboardTabPage() {
           setEditingItem(item);
           setEditAssetsOpen(true);
         }}
+        onItemUpdated={refreshStoryboardData}
         hideShotDetails={viewMode === "table"}
       />
       </motion.div>
