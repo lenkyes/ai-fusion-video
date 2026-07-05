@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Plus,
   Package,
-  Zap,
   TrendingUp,
   Users,
   MapPin,
@@ -25,7 +24,6 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
-import AssetTypePlaceholder from "@/components/dashboard/asset-type-placeholder";
 import { SafeImage } from "@/components/ui/safe-image";
 
 // ============================================================
@@ -270,7 +268,7 @@ export default function DashboardPage() {
           desc="智能辅助创作"
           color="text-purple-400"
           bg="bg-purple-500/10"
-          onClick={() => router.push("/projects")}
+          onClick={() => router.push("/dashboard/assistant")}
         />
       </motion.div>
 
