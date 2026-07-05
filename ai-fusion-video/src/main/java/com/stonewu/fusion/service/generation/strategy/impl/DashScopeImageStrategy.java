@@ -57,7 +57,7 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
     public List<String> generate(String prompt, String modelCode, int width, int height, int count,
                                  List<String> imageUrls, ApiConfig apiConfig) {
         DashScopeImageResult result = generateInternal(prompt, modelCode, width + "*" + height, count,
-                imageUrls, apiConfig, new JSONObject());
+                imageUrls, apiConfig, new JSONObject(), null);
         return result.imageUrls();
     }
 
@@ -72,7 +72,7 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
         List<String> refImageUrls = parseRefImageUrls(task.getRefImageUrls());
 
         DashScopeImageResult result = generateInternal(task.getPrompt(), modelCode, sizeText, count, refImageUrls,
-                apiConfig, config);
+                apiConfig, config, task.getNegativePrompt());
         updateItems(task, result, size[0], size[1]);
         log.info("[DashScope] 图片生成完成: taskId={}, model={}, imageCount={}", task.getTaskId(), modelCode,
                 result.imageUrls().size());
@@ -85,7 +85,8 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
     }
 
     private DashScopeImageResult generateInternal(String prompt, String modelCode, String sizeText, int count,
-                                                  List<String> imageUrls, ApiConfig apiConfig, JSONObject config) {
+                                                  List<String> imageUrls, ApiConfig apiConfig, JSONObject config,
+                                                  String negativePrompt) {
         DashScopeGenerationSupport.requireApiKey(apiConfig);
         String normalizedModelCode = StrUtil.blankToDefault(modelCode, "wan2.7-image").trim();
         int normalizedCount = Math.max(1, count);
@@ -95,19 +96,23 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
             throw new BusinessException("DashScope 模型 " + normalizedModelCode + " 不支持参考图输入");
         }
         if (shouldUseSpringAiImageSdk(normalizedModelCode, mediaUrls)) {
-            return generateWithSdk(prompt, normalizedModelCode, sizeText, normalizedCount, mediaUrls, apiConfig, config);
+            return generateWithSdk(prompt, normalizedModelCode, sizeText, normalizedCount, mediaUrls, apiConfig,
+                    config, negativePrompt);
         }
 
         // Spring AI Alibaba 1.1.2.0 尚未暴露 Wan2.6/2.7 与 Qwen-Image 2.0 的 messages 多模态请求对象；
         // DashScope Java SDK 2.22.x 已提供 ImageGeneration 高层 API，可兼容这些模型且无需手写 HTTP。
         return generateWithDashScopeJavaSdk(prompt, normalizedModelCode, sizeText, normalizedCount, mediaUrls,
-                apiConfig, config);
+                apiConfig, config, negativePrompt);
     }
 
     private DashScopeImageResult generateWithSdk(String prompt, String modelCode, String sizeText, int count,
-                                                 List<String> imageUrls, ApiConfig apiConfig, JSONObject config) {
-        DashScopeImageModel imageModel = buildSdkImageModel(apiConfig, modelCode, sizeText, count, imageUrls, config);
-        ImagePrompt imagePrompt = new ImagePrompt(prompt, buildSdkImageOptions(modelCode, sizeText, count, imageUrls, config));
+                                                 List<String> imageUrls, ApiConfig apiConfig, JSONObject config,
+                                                 String negativePrompt) {
+        DashScopeImageModel imageModel = buildSdkImageModel(apiConfig, modelCode, sizeText, count, imageUrls, config,
+                negativePrompt);
+        ImagePrompt imagePrompt = new ImagePrompt(prompt,
+                buildSdkImageOptions(modelCode, sizeText, count, imageUrls, config, negativePrompt));
         String taskId = imageModel.submitImageGenTask(imagePrompt);
         if (StrUtil.isBlank(taskId)) {
             throw new BusinessException("DashScope 图片 SDK 未返回 task_id");
@@ -121,19 +126,21 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
     }
 
     private DashScopeImageModel buildSdkImageModel(ApiConfig apiConfig, String modelCode, String sizeText, int count,
-                                                   List<String> imageUrls, JSONObject config) {
+                                                   List<String> imageUrls, JSONObject config,
+                                                   String negativePrompt) {
         DashScopeImageApi imageApi = DashScopeImageApi.builder()
                 .baseUrl(DashScopeGenerationSupport.resolveRootBaseUrl(apiConfig.getApiUrl()))
                 .apiKey(apiConfig.getApiKey())
                 .build();
         return DashScopeImageModel.builder()
                 .dashScopeApi(imageApi)
-                .defaultOptions(buildSdkImageOptions(modelCode, sizeText, count, imageUrls, config))
+                .defaultOptions(buildSdkImageOptions(modelCode, sizeText, count, imageUrls, config, negativePrompt))
                 .build();
     }
 
     private DashScopeImageOptions buildSdkImageOptions(String modelCode, String sizeText, int count,
-                                                       List<String> imageUrls, JSONObject config) {
+                                                       List<String> imageUrls, JSONObject config,
+                                                       String negativePrompt) {
         DashScopeImageOptions.Builder builder = DashScopeImageOptions.builder()
                 .model(modelCode)
                 .n(count);
@@ -143,11 +150,12 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
         if (imageUrls != null && imageUrls.size() == 1) {
             builder.refImg(imageUrls.get(0));
         }
-        String negativePrompt = firstNonBlank(
+        String effectiveNegativePrompt = firstNonBlank(
+                negativePrompt,
                 DashScopeGenerationSupport.getString(config, "negativePrompt"),
                 DashScopeGenerationSupport.getString(config, "negative_prompt"));
-        if (StrUtil.isNotBlank(negativePrompt)) {
-            builder.negativePrompt(negativePrompt);
+        if (StrUtil.isNotBlank(effectiveNegativePrompt)) {
+            builder.negativePrompt(effectiveNegativePrompt);
         }
         if (config != null && config.containsKey("promptExtend")) {
             builder.promptExtend(DashScopeGenerationSupport.getBoolean(config, "promptExtend", false));
@@ -183,11 +191,11 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
 
     private DashScopeImageResult generateWithDashScopeJavaSdk(String prompt, String modelCode, String sizeText,
                                                               int count, List<String> imageUrls, ApiConfig apiConfig,
-                                                              JSONObject config) {
+                                                              JSONObject config, String negativePrompt) {
         try {
             ImageGeneration imageGeneration = buildOfficialImageGeneration(apiConfig);
             ImageGenerationParam param = buildOfficialImageParam(prompt, modelCode, sizeText, count,
-                    imageUrls, apiConfig, config);
+                    imageUrls, apiConfig, config, negativePrompt);
             if (isOfficialAsyncImageModel(modelCode)) {
                 ImageGenerationResult imageResult = imageGeneration.asyncCall(param);
                 String taskId = extractTaskId(imageResult);
@@ -221,7 +229,7 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
 
     private ImageGenerationParam buildOfficialImageParam(String prompt, String modelCode, String sizeText,
                                                          int count, List<String> imageUrls, ApiConfig apiConfig,
-                                                         JSONObject config) {
+                                                         JSONObject config, String negativePrompt) {
         ImageGenerationParam.ImageGenerationParamBuilder<?, ?> builder = ImageGenerationParam.builder();
         builder.apiKey(apiConfig.getApiKey());
         builder.model(modelCode);
@@ -232,11 +240,12 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
         if (count > 0) {
             builder.n(count);
         }
-        String negativePrompt = firstNonBlank(
+        String effectiveNegativePrompt = firstNonBlank(
+                negativePrompt,
                 DashScopeGenerationSupport.getString(config, "negativePrompt"),
                 DashScopeGenerationSupport.getString(config, "negative_prompt"));
-        if (StrUtil.isNotBlank(negativePrompt)) {
-            builder.negativePrompt(negativePrompt);
+        if (StrUtil.isNotBlank(effectiveNegativePrompt)) {
+            builder.negativePrompt(effectiveNegativePrompt);
         }
         if (config != null && config.containsKey("promptExtend")) {
             builder.promptExtend(DashScopeGenerationSupport.getBoolean(config, "promptExtend", false));

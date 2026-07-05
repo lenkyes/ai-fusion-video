@@ -134,6 +134,7 @@ public class GenerateImageToolExecutor implements ToolExecutor {
             if (StrUtil.isBlank(prompt)) {
                 return errorResult("缺少 prompt");
             }
+            String negativePrompt = StrUtil.trim(params.getStr("negativePrompt"));
 
             int width = params.getInt("width", 0);
             int height = params.getInt("height", 0);
@@ -161,6 +162,7 @@ public class GenerateImageToolExecutor implements ToolExecutor {
             // 构建生图任务
             ImageTask task = ImageTask.builder()
                     .prompt(prompt)
+                    .negativePrompt(StrUtil.isBlank(negativePrompt) ? null : negativePrompt)
                     .width(width > 0 ? width : null)
                     .height(height > 0 ? height : null)
                     .refImageUrls(refImageUrls)

@@ -22,6 +22,7 @@ public interface GenerationConvert {
     @Mapping(target = "successCount", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "errorMsg", ignore = true)
+    @Mapping(target = "negativePrompt", ignore = true)
     @Mapping(target = "ownerType", ignore = true)
     @Mapping(target = "ownerId", ignore = true)
     ImageTask convert(ImageTaskSubmitReqVO reqVO);

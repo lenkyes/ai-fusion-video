@@ -39,6 +39,9 @@ public class ImageTask extends BaseEntity {
     /** 生图提示词 */
     private String prompt;
 
+    /** 生图反向提示词 */
+    private String negativePrompt;
+
     /** 提示词模板ID */
     private Long promptTemplateId;
 

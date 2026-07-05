@@ -56,8 +56,8 @@ public class ArtStylePresets {
         register(ArtStylePreset.builder()
                 .key("anime_cn")
                 .name("国漫")
-                .description("新国风高级动画风格，融合中国传统水墨画与现代数字插画技法，写意与工笔结合，流畅飘逸线条与灵动水墨晕染，东方传统色彩美学，武侠与东方奇幻氛围，气韵生动")
-                .imagePrompt("新国风高级动画风格，融合中国传统水墨画与现代数字插画技法，写意与工笔结合，流畅飘逸的线条与灵动的水墨晕染效果（Ink wash painting），使用传统的东方色彩美学（朱砂、石青、藤黄），武侠与东方奇幻氛围，强烈的气韵生动感，带有粗犷的毛笔笔触质感，神秘且空灵的古典光影，2D与3D结合的高级手绘质感")
+                .description("高端国漫动画风格，精致角色设定稿质感，清晰干净线稿，细腻赛璐璐上色与柔和渐变，东方审美配色，漂亮端正的五官结构，服饰纹样和材质细节精细，现代数字动画的高级光影与干净画面")
+                .imagePrompt("高端国漫动画角色设定稿风格，premium Chinese animation character design, clean refined line art, delicate cel shading, soft gradient coloring, elegant eastern color palette, beautiful symmetrical anime face, clean facial features, consistent eyes, natural facial structure, refined hair shape, detailed costume patterns, polished digital illustration, high detail, best quality, crisp edges, clean composition")
                 .referenceImagePath("/api/art-styles/anime_cn.jpg")
                 .build());
 
