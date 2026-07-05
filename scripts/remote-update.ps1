@@ -15,6 +15,16 @@ Deploy the local backend and frontend source folders to a remote Docker host.
   -PrivateKeyPath C:\Users\Administrator\.ssh\lens `
   -RemoteBasePath /root/team/ai-fusion-video `
   -UpdateMode frontend
+
+.EXAMPLE
+.\scripts\remote-update.ps1 -UpdateMode frontend
+
+Default incremental deployment keeps Docker images/build cache and reuses pnpm/Maven package caches.
+
+.EXAMPLE
+.\scripts\remote-update.ps1 -UpdateMode both -DeployStrategy clean -PruneDockerCache $true
+
+Run a full clean deployment when the remote host is low on disk or Docker cache is corrupted.
 #>
 
 [CmdletBinding()]
@@ -36,6 +46,12 @@ param(
     [ValidateSet("both", "backend", "frontend")]
     [string]$UpdateMode = "both",
 
+    [ValidateSet("incremental", "clean")]
+    [string]$DeployStrategy = "incremental",
+
+    [ValidateSet("auto", "archive", "rsync")]
+    [string]$TransferMode = "auto",
+
     [string]$BackendService = "backend",
 
     [string]$FrontendService = "frontend",
@@ -54,7 +70,7 @@ param(
         "ai-fusion-video-web"
     ),
 
-    [bool]$PruneDockerCache = $true,
+    [bool]$PruneDockerCache = $false,
 
     [string[]]$ArchiveExcludes = @(
         "ai-fusion-video-web/node_modules",
@@ -128,6 +144,61 @@ function Invoke-NativeCommand {
     }
 }
 
+function Test-RemoteRsyncAvailable {
+    Write-Host "==> Check remote rsync availability"
+    & ssh @script:SshArgs $script:RemoteTarget "command -v rsync >/dev/null 2>&1"
+    return $LASTEXITCODE -eq 0
+}
+
+function Get-RsyncExcludeArgs {
+    param([Parameter(Mandatory = $true)][string]$SourceFolder)
+
+    $excludeArgs = @()
+    $sourcePrefix = ($SourceFolder.TrimEnd("/", "\") + "/").Replace("\", "/")
+    foreach ($Exclude in $script:ArchiveExcludes) {
+        if ([string]::IsNullOrWhiteSpace($Exclude)) {
+            continue
+        }
+        $normalized = $Exclude.Replace("\", "/").TrimStart("/")
+        if ($normalized.StartsWith($sourcePrefix)) {
+            $relativeExclude = $normalized.Substring($sourcePrefix.Length)
+            if (-not [string]::IsNullOrWhiteSpace($relativeExclude)) {
+                $excludeArgs += "--exclude=$relativeExclude"
+            }
+        }
+    }
+    return $excludeArgs
+}
+
+function Sync-SourceFoldersWithRsync {
+    $sshCommand = "ssh -i `"$script:PrivateKeyPath`" -p $script:Port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=$script:StrictHostKeyChecking"
+    if ($script:StrictHostKeyChecking -eq "no") {
+        $sshCommand += " -o UserKnownHostsFile=/dev/null"
+    }
+
+    Push-Location -LiteralPath $script:ProjectRoot
+    try {
+        foreach ($SourceFolder in $script:SourceFolders) {
+            $remoteDestination = "${script:RemoteTarget}:$script:RemoteBasePath/$SourceFolder/"
+            $rsyncArgs = @(
+                "-az",
+                "--delete",
+                "--stats"
+            )
+            $rsyncArgs += Get-RsyncExcludeArgs -SourceFolder $SourceFolder
+            $rsyncArgs += @(
+                "-e", $sshCommand,
+                "$SourceFolder/",
+                $remoteDestination
+            )
+            Invoke-NativeCommand -FilePath "rsync" -Arguments $rsyncArgs -StepName "Sync $SourceFolder with rsync"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Invoke-RemoteBash {
     param(
         [Parameter(Mandatory = $true)][string]$StepName,
@@ -166,7 +237,6 @@ function Invoke-RemoteBash {
 
 Assert-Command "ssh"
 Assert-Command "scp"
-Assert-Command "tar"
 
 if (-not [string]::IsNullOrWhiteSpace($Target)) {
     $targetPattern = '^(?:(?<user>[^@:\s]+)@)?(?<host>[^:\s]+)(?::(?<port>\d+))?$'
@@ -256,13 +326,34 @@ if ($StrictHostKeyChecking -eq "no") {
     $ScpArgs += @("-o", "UserKnownHostsFile=/dev/null")
 }
 
+$LocalRsyncAvailable = $null -ne (Get-Command "rsync" -ErrorAction SilentlyContinue)
+$RemoteRsyncAvailable = $false
+if (($TransferMode -eq "auto" -or $TransferMode -eq "rsync") -and $LocalRsyncAvailable) {
+    $RemoteRsyncAvailable = Test-RemoteRsyncAvailable
+}
+
+if ($TransferMode -eq "rsync" -and -not ($LocalRsyncAvailable -and $RemoteRsyncAvailable)) {
+    throw "TransferMode=rsync requires rsync on both local machine and remote host."
+}
+
+$UseRsync = $TransferMode -eq "rsync" -or ($TransferMode -eq "auto" -and $LocalRsyncAvailable -and $RemoteRsyncAvailable)
+if ($UseRsync) {
+    Assert-Command "rsync"
+    Write-Host "==> Transfer mode: rsync (only changed files will be transferred)"
+} else {
+    Assert-Command "tar"
+    Write-Host "==> Transfer mode: archive (full source archive upload; Docker/package caches are still kept)"
+}
+
 $RemoteBaseQuoted = ConvertTo-BashSingleQuoted $RemoteBasePath
-$RemoteArchiveQuoted = ConvertTo-BashSingleQuoted $RemoteArchivePath
+$RemoteArchiveQuoted = ConvertTo-BashSingleQuoted $(if ($UseRsync) { "" } else { $RemoteArchivePath })
 $ComposeFileQuoted = ConvertTo-BashSingleQuoted $ComposeFile
 $SourceFolderArray = New-BashArrayLiteral $SourceFolders
 $ContainerArray = New-BashArrayLiteral $SelectedContainerNames
 $ImageArray = New-BashArrayLiteral ($SelectedImageNames | Select-Object -Unique)
 $ServiceArray = New-BashArrayLiteral $SelectedServices
+$CleanDeploy = $DeployStrategy -eq "clean"
+$CleanDeployFlag = if ($CleanDeploy) { "1" } else { "0" }
 $PruneDockerCacheFlag = if ($PruneDockerCache) { "1" } else { "0" }
 
 $CleanupScript = @'
@@ -272,22 +363,34 @@ remote_base=__REMOTE_BASE__
 source_dirs=(__SOURCE_DIRS__)
 containers=(__CONTAINERS__)
 images=(__IMAGES__)
+clean_deploy=__CLEAN_DEPLOY__
 prune_docker_cache=__PRUNE_DOCKER_CACHE__
 
 echo "[remote] ensure base directory: $remote_base"
 mkdir -p "$remote_base"
 
-if [ "${#containers[@]}" -gt 0 ]; then
-  echo "[remote] docker stop: ${containers[*]}"
-  docker stop "${containers[@]}" 2>/dev/null || true
+if [ "$clean_deploy" = "1" ]; then
+  echo "[remote] clean deploy: stop/remove selected containers, images, and source folders"
 
-  echo "[remote] docker rm: ${containers[*]}"
-  docker rm "${containers[@]}" 2>/dev/null || true
-fi
+  if [ "${#containers[@]}" -gt 0 ]; then
+    echo "[remote] docker stop: ${containers[*]}"
+    docker stop "${containers[@]}" 2>/dev/null || true
 
-if [ "${#images[@]}" -gt 0 ]; then
-  echo "[remote] docker rmi: ${images[*]}"
-  docker rmi "${images[@]}" 2>/dev/null || true
+    echo "[remote] docker rm: ${containers[*]}"
+    docker rm "${containers[@]}" 2>/dev/null || true
+  fi
+
+  if [ "${#images[@]}" -gt 0 ]; then
+    echo "[remote] docker rmi: ${images[*]}"
+    docker rmi "${images[@]}" 2>/dev/null || true
+  fi
+
+  echo "[remote] remove old source folders"
+  for source_dir in "${source_dirs[@]}"; do
+    rm -rf "$remote_base/$source_dir"
+  done
+else
+  echo "[remote] incremental deploy: keep existing containers, images, source folders, and build cache"
 fi
 
 if [ "$prune_docker_cache" = "1" ]; then
@@ -314,9 +417,8 @@ if [ "$prune_docker_cache" = "1" ]; then
   df -h || true
 fi
 
-echo "[remote] remove old source folders"
 for source_dir in "${source_dirs[@]}"; do
-  rm -rf "$remote_base/$source_dir"
+  mkdir -p "$remote_base/$source_dir"
 done
 '@
 $CleanupScript = $CleanupScript.
@@ -324,6 +426,7 @@ $CleanupScript = $CleanupScript.
     Replace("__SOURCE_DIRS__", $SourceFolderArray).
     Replace("__CONTAINERS__", $ContainerArray).
     Replace("__IMAGES__", $ImageArray).
+    Replace("__CLEAN_DEPLOY__", $CleanDeployFlag).
     Replace("__PRUNE_DOCKER_CACHE__", $PruneDockerCacheFlag)
 
 $DeployScript = @'
@@ -334,11 +437,15 @@ archive=__REMOTE_ARCHIVE__
 compose_file=__COMPOSE_FILE__
 services=(__SERVICES__)
 
-trap 'rm -f "$archive"' EXIT
+if [ -n "$archive" ]; then
+  trap 'rm -f "$archive"' EXIT
 
-echo "[remote] extract source archive"
-mkdir -p "$remote_base"
-tar -xzf "$archive" -C "$remote_base"
+  echo "[remote] extract source archive"
+  mkdir -p "$remote_base"
+  tar -xzf "$archive" -C "$remote_base"
+else
+  echo "[remote] source already synced by rsync"
+fi
 
 cd "$remote_base"
 if [ ! -f "$compose_file" ]; then
@@ -347,8 +454,8 @@ if [ ! -f "$compose_file" ]; then
 fi
 
 for service in "${services[@]}"; do
-  echo "[remote] docker compose up -d $service"
-  docker compose -f "$compose_file" up -d "$service"
+  echo "[remote] docker compose up -d --build $service"
+  DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -f "$compose_file" up -d --build "$service"
 done
 
 echo "[remote] compose status"
@@ -361,22 +468,27 @@ $DeployScript = $DeployScript.
     Replace("__SERVICES__", $ServiceArray)
 
 try {
-    $TarArgs = @("-czf", $ArchivePath)
-    foreach ($Exclude in $ArchiveExcludes) {
-        if (-not [string]::IsNullOrWhiteSpace($Exclude)) {
-            $TarArgs += "--exclude=$Exclude"
-        }
-    }
-    $TarArgs += @("-C", $ProjectRoot)
-    $TarArgs += $SourceFolders
+    Invoke-RemoteBash -StepName "Prepare remote deployment directories and cleanup policy" -Script $CleanupScript
 
-    Invoke-NativeCommand -FilePath "tar" -Arguments $TarArgs -StepName "Create source archive"
-    Invoke-RemoteBash -StepName "Clean remote containers, images, build cache, and source folders" -Script $CleanupScript
-    Invoke-NativeCommand `
-        -FilePath "scp" `
-        -Arguments ($ScpArgs + @($ArchivePath, "${RemoteTarget}:$RemoteArchivePath")) `
-        -StepName "Upload source archive"
-    Invoke-RemoteBash -StepName "Extract source and restart compose services" -Script $DeployScript
+    if ($UseRsync) {
+        Sync-SourceFoldersWithRsync
+    } else {
+        $TarArgs = @("-czf", $ArchivePath)
+        foreach ($Exclude in $ArchiveExcludes) {
+            if (-not [string]::IsNullOrWhiteSpace($Exclude)) {
+                $TarArgs += "--exclude=$Exclude"
+            }
+        }
+        $TarArgs += @("-C", $ProjectRoot)
+        $TarArgs += $SourceFolders
+
+        Invoke-NativeCommand -FilePath "tar" -Arguments $TarArgs -StepName "Create source archive"
+        Invoke-NativeCommand `
+            -FilePath "scp" `
+            -Arguments ($ScpArgs + @($ArchivePath, "${RemoteTarget}:$RemoteArchivePath")) `
+            -StepName "Upload source archive"
+    }
+    Invoke-RemoteBash -StepName "Build and restart compose services" -Script $DeployScript
 
     Write-Host "==> Remote update completed."
 }

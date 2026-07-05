@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stonewu.fusion.common.BusinessException;
 import com.stonewu.fusion.controller.cost.vo.BatchUpdateCostConfigReqVO;
 import com.stonewu.fusion.entity.ai.AiModel;
+import com.stonewu.fusion.entity.asset.Asset;
+import com.stonewu.fusion.entity.asset.AssetItem;
 import com.stonewu.fusion.entity.cost.GenerationCostConfig;
 import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
@@ -18,6 +20,7 @@ import com.stonewu.fusion.mapper.generation.ImageItemMapper;
 import com.stonewu.fusion.mapper.generation.ImageTaskMapper;
 import com.stonewu.fusion.mapper.generation.VideoItemMapper;
 import com.stonewu.fusion.mapper.generation.VideoTaskMapper;
+import com.stonewu.fusion.service.asset.AssetService;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,6 +51,7 @@ public class GenerationCostAnalysisService {
     public static final String BILLING_PER_SECOND = "per_second";
     public static final String BILLING_FREE = "free";
     private static final String STORYBOARD_ITEM_CATEGORY_PREFIX = "storyboard_item:";
+    private static final String ASSET_ITEM_CATEGORY_PREFIX = "asset_item:";
 
     private final GenerationCostConfigMapper costConfigMapper;
     private final AiModelMapper aiModelMapper;
@@ -56,6 +60,7 @@ public class GenerationCostAnalysisService {
     private final VideoTaskMapper videoTaskMapper;
     private final VideoItemMapper videoItemMapper;
     private final StoryboardService storyboardService;
+    private final AssetService assetService;
 
     public List<CostConfigRow> listModelCostConfigs(String mediaType) {
         String normalizedMediaType = normalizeMediaType(mediaType);
@@ -105,7 +110,7 @@ public class GenerationCostAnalysisService {
             String billingMode = normalizeBillingMode(item.getBillingMode(), mediaType);
             BigDecimal unitPrice = normalizePrice(item.getUnitPrice());
             String currency = StrUtil.blankToDefault(item.getCurrency(), "CNY").trim().toUpperCase(Locale.ROOT);
-            Boolean enabled = item.getEnabled() != null ? item.getEnabled() : true;
+            Boolean enabled = normalizeEnabled(item.getEnabled(), billingMode, unitPrice);
 
             GenerationCostConfig existing = costConfigMapper.selectOne(new LambdaQueryWrapper<GenerationCostConfig>()
                     .eq(GenerationCostConfig::getModelId, item.getModelId())
@@ -144,18 +149,31 @@ public class GenerationCostAnalysisService {
         Map<String, ModelCostAccumulator> modelAccumulators = new LinkedHashMap<>();
         Map<Long, ShotCostAccumulator> shotAccumulators = new LinkedHashMap<>();
         Map<Long, Long> storyboardItemProjectCache = new HashMap<>();
+        Map<Long, Long> assetItemProjectCache = new HashMap<>();
 
         CostAccumulator total = new CostAccumulator();
-        List<ImageTask> imageTasks = loadProjectImageTasks(projectId, storyboardItemProjectCache);
-        Map<Long, List<ImageItem>> imageItemsByTask = loadImageItemsByTask(imageTasks);
-        for (ImageTask task : imageTasks) {
-            int successCount = countSuccessfulImages(task, imageItemsByTask.get(task.getId()));
-            GenerationCostConfig config = configMap.get(configKey(task.getModelId(), MEDIA_IMAGE));
+        List<ImageCostEntry> imageCostEntries = loadProjectAssetImageCostEntries(projectId);
+        if (imageCostEntries.isEmpty()) {
+            imageCostEntries = loadProjectImageTaskCostEntries(projectId, storyboardItemProjectCache, assetItemProjectCache);
+        }
+        int imageTaskCount = (int) imageCostEntries.stream()
+                .map(ImageCostEntry::task)
+                .filter(Objects::nonNull)
+                .map(ImageTask::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+        for (ImageCostEntry entry : imageCostEntries) {
+            ImageTask task = entry.task();
+            int successCount = entry.successCount();
+            Long modelId = task != null ? task.getModelId() : null;
+            String category = task != null ? task.getCategory() : null;
+            GenerationCostConfig config = configMap.get(configKey(modelId, MEDIA_IMAGE));
             BigDecimal cost = calculateImageCost(successCount, config);
             boolean priced = successCount > 0 && isBillable(config);
             total.addImage(successCount, cost, priced);
-            addModelCost(modelAccumulators, task.getModelId(), MEDIA_IMAGE, modelMap, config, successCount, 0, cost, priced);
-            addShotImageCost(shotAccumulators, task.getCategory(), successCount, cost, priced);
+            addModelCost(modelAccumulators, modelId, MEDIA_IMAGE, modelMap, config, successCount, 0, cost, priced);
+            addShotImageCost(shotAccumulators, category, successCount, cost, priced);
         }
 
         List<VideoTask> videoTasks = loadProjectVideoTasks(projectId, storyboardItemProjectCache);
@@ -189,7 +207,7 @@ public class GenerationCostAnalysisService {
                 money(total.totalCost()),
                 money(total.imageCost),
                 money(total.videoCost),
-                imageTasks.size(),
+                imageTaskCount,
                 videoTasks.size(),
                 total.imageSuccessCount,
                 total.videoSuccessCount,
@@ -218,15 +236,136 @@ public class GenerationCostAnalysisService {
                         (left, right) -> right));
     }
 
-    private List<ImageTask> loadProjectImageTasks(Long projectId, Map<Long, Long> storyboardItemProjectCache) {
+    private List<ImageCostEntry> loadProjectImageTaskCostEntries(Long projectId,
+                                                                 Map<Long, Long> storyboardItemProjectCache,
+                                                                 Map<Long, Long> assetItemProjectCache) {
+        List<ImageTask> imageTasks = loadProjectImageTasks(projectId, storyboardItemProjectCache, assetItemProjectCache);
+        Map<Long, List<ImageItem>> imageItemsByTask = loadImageItemsByTask(imageTasks);
+        List<ImageCostEntry> entries = new ArrayList<>();
+        for (ImageTask task : imageTasks) {
+            int successCount = countSuccessfulImages(task, imageItemsByTask.get(task.getId()));
+            if (successCount > 0) {
+                entries.add(new ImageCostEntry(task, successCount));
+            }
+        }
+        return entries;
+    }
+
+    private List<ImageCostEntry> loadProjectAssetImageCostEntries(Long projectId) {
+        List<AssetImageRef> assetImages = loadProjectAssetImageRefs(projectId);
+        if (assetImages.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> imageUrls = assetImages.stream()
+                .map(AssetImageRef::imageUrl)
+                .distinct()
+                .toList();
+        Map<String, ImageTask> taskByUrl = loadImageTasksByOutputUrl(imageUrls);
+        Map<String, Integer> successCounts = new LinkedHashMap<>();
+        Map<String, ImageTask> tasks = new HashMap<>();
+        for (AssetImageRef image : assetImages) {
+            ImageTask task = taskByUrl.get(image.imageUrl());
+            if (task == null && !image.aiGenerated()) {
+                continue;
+            }
+            String key = task != null && task.getId() != null ? "task:" + task.getId() : "unmatched";
+            successCounts.merge(key, 1, Integer::sum);
+            tasks.putIfAbsent(key, task);
+        }
+        return successCounts.entrySet().stream()
+                .map(entry -> new ImageCostEntry(tasks.get(entry.getKey()), entry.getValue()))
+                .toList();
+    }
+
+    private Map<String, ImageTask> loadImageTasksByOutputUrl(List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return Map.of();
+        }
+
+        List<ImageItem> imageItems = imageItemMapper.selectList(new LambdaQueryWrapper<ImageItem>()
+                .eq(ImageItem::getStatus, 1)
+                .and(wrapper -> wrapper.in(ImageItem::getImageUrl, imageUrls)
+                        .or()
+                        .in(ImageItem::getThumbnailUrl, imageUrls)));
+        List<Long> taskIds = imageItems.stream()
+                .map(ImageItem::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (taskIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, ImageTask> taskMap = imageTaskMapper.selectList(new LambdaQueryWrapper<ImageTask>()
+                        .in(ImageTask::getId, taskIds))
+                .stream()
+                .collect(Collectors.toMap(ImageTask::getId, Function.identity(), (left, right) -> left));
+        Map<String, ImageTask> taskByUrl = new HashMap<>();
+        for (ImageItem item : imageItems) {
+            ImageTask task = taskMap.get(item.getTaskId());
+            if (task == null) {
+                continue;
+            }
+            putTaskByUrl(taskByUrl, item.getImageUrl(), task);
+            putTaskByUrl(taskByUrl, item.getThumbnailUrl(), task);
+        }
+        return taskByUrl;
+    }
+
+    private List<AssetImageRef> loadProjectAssetImageRefs(Long projectId) {
+        List<Asset> assets = assetService.listByProject(projectId);
+        if (assets == null || assets.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, AssetImageRef> refs = new LinkedHashMap<>();
+        for (Asset asset : assets) {
+            if (asset == null || asset.getId() == null) {
+                continue;
+            }
+            List<AssetItem> items = assetService.listItems(asset.getId());
+            boolean hasItemImage = false;
+            if (items != null && !items.isEmpty()) {
+                for (AssetItem item : items) {
+                    if (item == null) {
+                        continue;
+                    }
+                    String imageUrl = firstNotBlank(item.getImageUrl(), item.getThumbnailUrl());
+                    if (imageUrl != null) {
+                        hasItemImage = true;
+                        putAssetImageRef(refs, imageUrl, isAiGenerated(item.getSourceType()));
+                    }
+                }
+            }
+            if (!hasItemImage) {
+                putAssetImageRef(refs, asset.getCoverUrl(), isAiGenerated(asset.getSourceType()));
+            }
+        }
+        return new ArrayList<>(refs.values());
+    }
+
+    private List<ImageTask> loadProjectImageTasks(Long projectId,
+                                                  Map<Long, Long> storyboardItemProjectCache,
+                                                  Map<Long, Long> assetItemProjectCache) {
         List<ImageTask> candidates = imageTaskMapper.selectList(new LambdaQueryWrapper<ImageTask>()
                 .and(wrapper -> wrapper.eq(ImageTask::getProjectId, projectId)
                         .or()
-                        .likeRight(ImageTask::getCategory, STORYBOARD_ITEM_CATEGORY_PREFIX))
+                        .likeRight(ImageTask::getCategory, STORYBOARD_ITEM_CATEGORY_PREFIX)
+                        .or()
+                        .likeRight(ImageTask::getCategory, ASSET_ITEM_CATEGORY_PREFIX))
                 .orderByDesc(ImageTask::getCreateTime));
-        return candidates.stream()
-                .filter(task -> belongsToProject(task.getProjectId(), task.getCategory(), projectId, storyboardItemProjectCache))
-                .toList();
+        Map<Long, ImageTask> taskMap = new LinkedHashMap<>();
+        for (ImageTask task : candidates) {
+            if (belongsToProject(task.getProjectId(), task.getCategory(), projectId,
+                    storyboardItemProjectCache, assetItemProjectCache)) {
+                taskMap.put(task.getId(), task);
+            }
+        }
+        for (ImageTask task : loadProjectAssetImageTasksByOutputUrl(projectId)) {
+            taskMap.putIfAbsent(task.getId(), task);
+        }
+        return new ArrayList<>(taskMap.values());
     }
 
     private List<VideoTask> loadProjectVideoTasks(Long projectId, Map<Long, Long> storyboardItemProjectCache) {
@@ -236,14 +375,16 @@ public class GenerationCostAnalysisService {
                         .likeRight(VideoTask::getCategory, STORYBOARD_ITEM_CATEGORY_PREFIX))
                 .orderByDesc(VideoTask::getCreateTime));
         return candidates.stream()
-                .filter(task -> belongsToProject(task.getProjectId(), task.getCategory(), projectId, storyboardItemProjectCache))
+                .filter(task -> belongsToProject(task.getProjectId(), task.getCategory(), projectId,
+                        storyboardItemProjectCache, new HashMap<>()))
                 .toList();
     }
 
     private boolean belongsToProject(Long taskProjectId,
                                      String category,
                                      Long projectId,
-                                     Map<Long, Long> storyboardItemProjectCache) {
+                                     Map<Long, Long> storyboardItemProjectCache,
+                                     Map<Long, Long> assetItemProjectCache) {
         if (Objects.equals(taskProjectId, projectId)) {
             return true;
         }
@@ -252,7 +393,9 @@ public class GenerationCostAnalysisService {
         }
         Long storyboardItemId = parseStoryboardItemId(category);
         if (storyboardItemId == null) {
-            return false;
+            Long assetItemId = parseAssetItemId(category);
+            return assetItemId != null
+                    && Objects.equals(resolveAssetItemProjectId(assetItemId, assetItemProjectCache), projectId);
         }
         return Objects.equals(resolveStoryboardItemProjectId(storyboardItemId, storyboardItemProjectCache), projectId);
     }
@@ -274,6 +417,72 @@ public class GenerationCostAnalysisService {
         }
         storyboardItemProjectCache.put(storyboardItemId, projectId);
         return projectId;
+    }
+
+    private Long resolveAssetItemProjectId(Long assetItemId, Map<Long, Long> assetItemProjectCache) {
+        if (assetItemProjectCache.containsKey(assetItemId)) {
+            return assetItemProjectCache.get(assetItemId);
+        }
+
+        Long projectId = null;
+        try {
+            AssetItem item = assetService.getItemById(assetItemId);
+            if (item != null && item.getAssetId() != null) {
+                Asset asset = assetService.getById(item.getAssetId());
+                projectId = asset != null ? asset.getProjectId() : null;
+            }
+        } catch (Exception ignored) {
+            // Historical tasks without a valid asset item cannot be assigned to a project.
+        }
+        assetItemProjectCache.put(assetItemId, projectId);
+        return projectId;
+    }
+
+    private List<ImageTask> loadProjectAssetImageTasksByOutputUrl(Long projectId) {
+        List<String> imageUrls = loadProjectAssetImageUrls(projectId);
+        if (imageUrls.isEmpty()) {
+            return List.of();
+        }
+        List<ImageItem> imageItems = imageItemMapper.selectList(new LambdaQueryWrapper<ImageItem>()
+                .in(ImageItem::getImageUrl, imageUrls)
+                .eq(ImageItem::getStatus, 1));
+        List<Long> taskIds = imageItems.stream()
+                .map(ImageItem::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (taskIds.isEmpty()) {
+            return List.of();
+        }
+        return imageTaskMapper.selectList(new LambdaQueryWrapper<ImageTask>()
+                .in(ImageTask::getId, taskIds)
+                .orderByDesc(ImageTask::getCreateTime));
+    }
+
+    private List<String> loadProjectAssetImageUrls(Long projectId) {
+        List<Asset> assets = assetService.listByProject(projectId);
+        if (assets == null || assets.isEmpty()) {
+            return List.of();
+        }
+        List<String> imageUrls = new ArrayList<>();
+        for (Asset asset : assets) {
+            if (asset == null || asset.getId() == null) {
+                continue;
+            }
+            addIfNotBlank(imageUrls, asset.getCoverUrl());
+            List<AssetItem> items = assetService.listItems(asset.getId());
+            if (items == null || items.isEmpty()) {
+                continue;
+            }
+            for (AssetItem item : items) {
+                if (item == null) {
+                    continue;
+                }
+                addIfNotBlank(imageUrls, item.getImageUrl());
+                addIfNotBlank(imageUrls, item.getThumbnailUrl());
+            }
+        }
+        return imageUrls.stream().distinct().toList();
     }
 
     private Map<Long, List<ImageItem>> loadImageItemsByTask(List<ImageTask> tasks) {
@@ -353,7 +562,7 @@ public class GenerationCostAnalysisService {
 
     private boolean isBillable(GenerationCostConfig config) {
         return config != null
-                && Boolean.TRUE.equals(config.getEnabled())
+                && isCostConfigEnabled(config)
                 && !BILLING_FREE.equals(config.getBillingMode())
                 && config.getUnitPrice() != null
                 && config.getUnitPrice().compareTo(BigDecimal.ZERO) > 0;
@@ -427,7 +636,7 @@ public class GenerationCostAnalysisService {
                 config != null ? config.getBillingMode() : defaultBillingMode(mediaType),
                 config != null ? normalizePrice(config.getUnitPrice()) : BigDecimal.ZERO.setScale(6, RoundingMode.HALF_UP),
                 config != null ? StrUtil.blankToDefault(config.getCurrency(), "CNY") : "CNY",
-                config != null && Boolean.TRUE.equals(config.getEnabled()),
+                config != null ? isCostConfigEnabled(config) : true,
                 config != null,
                 config != null ? config.getRemark() : null,
                 config != null ? config.getUpdateTime() : null
@@ -480,6 +689,26 @@ public class GenerationCostAnalysisService {
         return price.setScale(6, RoundingMode.HALF_UP);
     }
 
+    private Boolean normalizeEnabled(Boolean enabled, String billingMode, BigDecimal unitPrice) {
+        if (BILLING_FREE.equals(billingMode)) {
+            return false;
+        }
+        if (unitPrice != null && unitPrice.compareTo(BigDecimal.ZERO) > 0) {
+            return true;
+        }
+        return enabled != null ? enabled : true;
+    }
+
+    private boolean isCostConfigEnabled(GenerationCostConfig config) {
+        if (config == null || BILLING_FREE.equals(config.getBillingMode())) {
+            return false;
+        }
+        if (config.getUnitPrice() != null && config.getUnitPrice().compareTo(BigDecimal.ZERO) > 0) {
+            return true;
+        }
+        return Boolean.TRUE.equals(config.getEnabled());
+    }
+
     private BigDecimal money(BigDecimal value) {
         return value == null ? BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP) : value.setScale(4, RoundingMode.HALF_UP);
     }
@@ -489,10 +718,18 @@ public class GenerationCostAnalysisService {
     }
 
     private Long parseStoryboardItemId(String category) {
-        if (StrUtil.isBlank(category) || !category.startsWith("storyboard_item:")) {
+        return parseCategoryId(category, STORYBOARD_ITEM_CATEGORY_PREFIX);
+    }
+
+    private Long parseAssetItemId(String category) {
+        return parseCategoryId(category, ASSET_ITEM_CATEGORY_PREFIX);
+    }
+
+    private Long parseCategoryId(String category, String prefix) {
+        if (StrUtil.isBlank(category) || StrUtil.isBlank(prefix) || !category.startsWith(prefix)) {
             return null;
         }
-        String raw = category.substring("storyboard_item:".length());
+        String raw = category.substring(prefix.length());
         int colonIndex = raw.indexOf(':');
         if (colonIndex >= 0) {
             raw = raw.substring(0, colonIndex);
@@ -502,6 +739,46 @@ public class GenerationCostAnalysisService {
         } catch (NumberFormatException ignored) {
             return null;
         }
+    }
+
+    private void addIfNotBlank(List<String> values, String value) {
+        if (StrUtil.isNotBlank(value)) {
+            values.add(value);
+        }
+    }
+
+    private void putTaskByUrl(Map<String, ImageTask> taskByUrl, String imageUrl, ImageTask task) {
+        String normalizedUrl = normalizeUrl(imageUrl);
+        if (normalizedUrl != null) {
+            taskByUrl.putIfAbsent(normalizedUrl, task);
+        }
+    }
+
+    private void putAssetImageRef(Map<String, AssetImageRef> refs, String imageUrl, boolean aiGenerated) {
+        String normalizedUrl = normalizeUrl(imageUrl);
+        if (normalizedUrl == null) {
+            return;
+        }
+        AssetImageRef existing = refs.get(normalizedUrl);
+        if (existing == null || (aiGenerated && !existing.aiGenerated())) {
+            refs.put(normalizedUrl, new AssetImageRef(normalizedUrl, aiGenerated));
+        }
+    }
+
+    private boolean isAiGenerated(Integer sourceType) {
+        return Objects.equals(sourceType, 2);
+    }
+
+    private String firstNotBlank(String first, String second) {
+        String normalizedFirst = normalizeUrl(first);
+        return normalizedFirst != null ? normalizedFirst : normalizeUrl(second);
+    }
+
+    private String normalizeUrl(String imageUrl) {
+        if (StrUtil.isBlank(imageUrl)) {
+            return null;
+        }
+        return imageUrl.trim();
     }
 
     private int positive(Integer value) {
@@ -571,6 +848,12 @@ public class GenerationCostAnalysisService {
     }
 
     private record SuccessfulVideoStats(int count, int seconds) {
+    }
+
+    private record ImageCostEntry(ImageTask task, int successCount) {
+    }
+
+    private record AssetImageRef(String imageUrl, boolean aiGenerated) {
     }
 
     private static class CostAccumulator {

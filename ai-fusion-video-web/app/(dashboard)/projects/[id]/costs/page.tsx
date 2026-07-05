@@ -111,12 +111,17 @@ export default function ProjectCostsPage() {
   };
 
   const updateConfig = (key: string, patch: Partial<CostConfigRow>) => {
+    const shouldAutoEnable =
+      patch.enabled === undefined &&
+      ((patch.unitPrice !== undefined && Number(patch.unitPrice) > 0) ||
+        (patch.billingMode !== undefined && patch.billingMode !== "free"));
     setConfigs((prev) =>
       prev.map((row) =>
         rowKey(row) === key
           ? {
               ...row,
               ...patch,
+              ...(shouldAutoEnable ? { enabled: true } : {}),
               configured: true,
             }
           : row
@@ -170,7 +175,7 @@ export default function ProjectCostsPage() {
           billingMode: row.billingMode,
           unitPrice: Number(row.unitPrice || 0),
           currency: row.currency || "CNY",
-          enabled: row.enabled,
+          enabled: row.billingMode !== "free" && Number(row.unitPrice || 0) > 0 ? true : row.enabled,
           remark: row.remark,
         }))
       );
