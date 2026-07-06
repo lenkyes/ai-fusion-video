@@ -19,7 +19,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import AssetTypePlaceholder from "@/components/dashboard/asset-type-placeholder";
 import { SafeImage } from "@/components/ui/safe-image";
 import {
   Save,
@@ -70,6 +69,19 @@ function parseProps(raw: unknown): Record<string, string> {
   }
   if (typeof raw === "object") return raw as Record<string, string>;
   return {};
+}
+
+function normalizeMediaUrl(raw?: string | null) {
+  const value = raw?.trim();
+  if (!value) return "";
+  return (resolveMediaUrl(value) || value).trim();
+}
+
+function isSameMediaUrl(a?: string | null, b?: string | null) {
+  const rawA = a?.trim();
+  const rawB = b?.trim();
+  if (!rawA || !rawB) return false;
+  return rawA === rawB || normalizeMediaUrl(rawA) === normalizeMediaUrl(rawB);
 }
 
 const assetTypeOptions = [
@@ -137,13 +149,11 @@ function CoverSelectorDialog({
   open, 
   onOpenChange, 
   projectId, 
-  currentAssetId,
   onSelect 
 }: { 
   open: boolean; 
   onOpenChange: (open: boolean) => void; 
   projectId: number; 
-  currentAssetId: number;
   onSelect: (url: string) => void; 
 }) {
   const [assets, setAssets] = useState<AssetWithItems[]>([]);
@@ -295,7 +305,7 @@ function AssetItemEditPanel({
   assetType: string;
   projectId: number;
   onClose: () => void;
-  onUpdated: () => void;
+  onUpdated: (updatedItem?: AssetItem) => void;
   onDeleted: () => void;
 }) {
   const [name, setName] = useState(item.name || "");
@@ -306,6 +316,7 @@ function AssetItemEditPanel({
   const [itemMetaLoading, setItemMetaLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showLightbox, setShowLightbox] = useState(false);
   const [urlMode, setUrlMode] = useState(false);
@@ -320,6 +331,7 @@ function AssetItemEditPanel({
     setDirty(false);
     setShowLightbox(false);
     setUrlMode(false);
+    setGenerating(false);
   }, [item]);
 
   useEffect(() => {
@@ -401,6 +413,42 @@ function AssetItemEditPanel({
     void uploadItemImage(file);
   };
 
+  const handleRegenerateItemImage = useCallback(() => {
+    if (generating) return;
+
+    let handled = false;
+    setGenerating(true);
+
+    const { addPipeline, setNotificationOpen } = usePipelineStore.getState();
+    addPipeline({
+      label: `${imageUrl ? "重新生成图片" : "生成图片"}: ${item.name || "子资产"}`,
+      projectId,
+      request: {
+        agentType: "asset_image_gen",
+        projectId,
+        message: `请${imageUrl ? "重新生成并替换" : "生成"}子资产「${item.name || item.id}」的图片，只处理指定子资产。`,
+        context: {
+          selectedAssetIds: [assetId],
+          selectedAssetItemIds: [item.id],
+        },
+      },
+      onComplete: async () => {
+        if (handled) return;
+        handled = true;
+        try {
+          const latestItem = await assetApi.getItem(item.id);
+          setImageUrl(latestItem.imageUrl || "");
+          onUpdated(latestItem);
+        } catch (err) {
+          console.error("重新生成子资产图片失败:", err);
+        } finally {
+          setGenerating(false);
+        }
+      },
+    });
+    setNotificationOpen(true);
+  }, [assetId, generating, imageUrl, item.id, item.name, onUpdated, projectId]);
+
   return (
     <div className="h-full flex flex-col">
       {/* 头部 */}
@@ -473,7 +521,7 @@ function AssetItemEditPanel({
           )}
 
           {/* 悬浮操作遮罩 */}
-          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/40 transition-all duration-200 flex items-center justify-center gap-2 opacity-0 group-hover/img:opacity-100 z-20">
+          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/40 transition-all duration-200 flex flex-wrap items-center justify-center gap-2 p-4 opacity-0 group-hover/img:opacity-100 z-20">
             {imageUrl && (
               <button
                 onClick={() => setShowLightbox(true)}
@@ -493,30 +541,17 @@ function AssetItemEditPanel({
               上传
             </button>
             <button
-              onClick={() => {
-                const { addPipeline, setNotificationOpen } = usePipelineStore.getState();
-                addPipeline({
-                  label: `生成图片: ${item.name || '子资产'}`,
-                  projectId,
-                  request: {
-                    agentType: 'asset_image_gen',
-                    projectId,
-                    context: {
-                      selectedAssetIds: [assetId],
-                      selectedAssetItemIds: [item.id],
-                    },
-                  },
-                  onComplete: () => {
-                    onUpdated();
-                  },
-                });
-                setNotificationOpen(true);
-              }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-white/15 text-white/90 hover:bg-white/25 backdrop-blur-sm transition-all text-[10px] font-medium"
-              title="AI 生图"
+              onClick={handleRegenerateItemImage}
+              disabled={generating}
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-white/15 text-white/90 hover:bg-white/25 backdrop-blur-sm transition-all text-[10px] font-medium disabled:opacity-50 disabled:pointer-events-none"
+              title={imageUrl ? "重新生成图片" : "AI 生图"}
             >
-              <Sparkles className="h-4 w-4" />
-              生图
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {imageUrl ? "重新生成" : "生图"}
             </button>
           </div>
 
@@ -866,6 +901,7 @@ export default function AssetDetailPanel(props: Props) {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [coverUploading, setCoverUploading] = useState(false);
+  const [coverRegenerating, setCoverRegenerating] = useState(false);
   const [dirty, setDirty] = useState(false);
   const coverFileRef = useRef<HTMLInputElement>(null);
   const [showCoverLightbox, setShowCoverLightbox] = useState(false);
@@ -908,9 +944,16 @@ export default function AssetDetailPanel(props: Props) {
     try {
       setItemsLoading(true);
       const data = await assetApi.listItems(assetId);
-      setItems(data || []);
+      const nextItems = data || [];
+      setItems(nextItems);
+      setSelectedItem((prev) => {
+        if (!prev) return prev;
+        return nextItems.find((item) => item.id === prev.id) || prev;
+      });
+      return nextItems;
     } catch {
       setItems([]);
+      return [];
     } finally {
       setItemsLoading(false);
     }
@@ -934,6 +977,75 @@ export default function AssetDetailPanel(props: Props) {
       setCoverUploading(false);
     }
   }, []);
+
+  const resolveCoverRegenerateTarget = useCallback(() => {
+    if (items.length === 0) return null;
+    const matchedByCover = coverUrl
+      ? items.find((item) =>
+          isSameMediaUrl(item.imageUrl, coverUrl) ||
+          isSameMediaUrl(item.thumbnailUrl, coverUrl)
+        )
+      : null;
+    if (matchedByCover) return matchedByCover;
+    return (
+      items.find((item) => item.itemType === "initial") ||
+      items.find((item) => item.imageUrl || item.thumbnailUrl) ||
+      items[0]
+    );
+  }, [coverUrl, items]);
+
+  const handleRegenerateCover = useCallback(() => {
+    if (!asset || coverRegenerating) return;
+    const targetItem = resolveCoverRegenerateTarget();
+    if (!targetItem) {
+      console.warn("未找到可用于重新生成封面的子资产");
+      return;
+    }
+
+    let handled = false;
+    setCoverRegenerating(true);
+
+    const { addPipeline, setNotificationOpen } = usePipelineStore.getState();
+    addPipeline({
+      label: `重新生成封面: ${asset.name || "资产"}`,
+      projectId: asset.projectId,
+      request: {
+        agentType: "asset_image_gen",
+        projectId: asset.projectId,
+        message: `请重新生成资产「${asset.name}」的封面图，只处理指定的子资产，生成成功后替换原图。`,
+        context: {
+          selectedAssetIds: [asset.id],
+          selectedAssetItemIds: [targetItem.id],
+        },
+      },
+      onComplete: async () => {
+        if (handled) return;
+        handled = true;
+        try {
+          const latestItems = await assetApi.listItems(asset.id);
+          setItems(latestItems || []);
+          const updatedItem = latestItems.find((item) => item.id === targetItem.id);
+          const nextCoverUrl = updatedItem?.imageUrl || updatedItem?.thumbnailUrl;
+          if (!nextCoverUrl) {
+            console.warn("封面重新生成完成，但未找到新图片地址");
+            return;
+          }
+          await assetApi.update({
+            id: asset.id,
+            coverUrl: nextCoverUrl,
+          });
+          setCoverUrl(nextCoverUrl);
+          setSelectedItem((prev) => (prev && updatedItem && prev.id === updatedItem.id ? updatedItem : prev));
+          onSaved();
+        } catch (err) {
+          console.error("重新生成封面失败:", err);
+        } finally {
+          setCoverRegenerating(false);
+        }
+      },
+    });
+    setNotificationOpen(true);
+  }, [asset, coverRegenerating, onSaved, resolveCoverRegenerateTarget]);
 
   const handleSave = async () => {
     if (!asset) return;
@@ -1171,7 +1283,7 @@ export default function AssetDetailPanel(props: Props) {
                   </div>
                 )}
                 {/* 悬浮操作遮罩 */}
-                <div className="absolute inset-0 bg-black/0 group-hover/cover:bg-black/40 transition-all duration-200 flex items-center justify-center gap-2 opacity-0 group-hover/cover:opacity-100 z-20">
+                <div className="absolute inset-0 bg-black/0 group-hover/cover:bg-black/40 transition-all duration-200 flex flex-wrap items-center justify-center gap-2 p-4 opacity-0 group-hover/cover:opacity-100 z-20">
                   {coverUrl && (
                     <button
                       onClick={() => setShowCoverLightbox(true)}
@@ -1189,6 +1301,19 @@ export default function AssetDetailPanel(props: Props) {
                   >
                     <Library className="h-4 w-4" />
                     资料库
+                  </button>
+                  <button
+                    onClick={handleRegenerateCover}
+                    disabled={coverRegenerating || itemsLoading || items.length === 0}
+                    className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-white/15 text-white/90 hover:bg-white/25 backdrop-blur-sm transition-all text-[10px] font-medium disabled:opacity-50 disabled:pointer-events-none"
+                    title={items.length === 0 ? "暂无可重新生成的子资产" : "重新生成封面"}
+                  >
+                    {coverRegenerating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    重新生成
                   </button>
                   <button
                     onClick={() => coverFileRef.current?.click()}
@@ -1424,7 +1549,12 @@ export default function AssetDetailPanel(props: Props) {
             assetType={asset.type}
             projectId={asset.projectId}
             onClose={() => setSelectedItem(null)}
-            onUpdated={() => loadItems(asset.id)}
+            onUpdated={(updatedItem) => {
+              if (updatedItem) {
+                setSelectedItem(updatedItem);
+              }
+              loadItems(asset.id);
+            }}
             onDeleted={() => {
               setSelectedItem(null);
               loadItems(asset.id);
@@ -1437,7 +1567,6 @@ export default function AssetDetailPanel(props: Props) {
         open={isCoverSelectorOpen} 
         onOpenChange={setIsCoverSelectorOpen} 
         projectId={asset.projectId} 
-        currentAssetId={asset.id}
         onSelect={(url) => {
           setCoverUrl(url);
           setDirty(true);

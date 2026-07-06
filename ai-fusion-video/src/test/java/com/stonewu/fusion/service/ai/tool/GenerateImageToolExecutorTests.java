@@ -72,4 +72,44 @@ class GenerateImageToolExecutorTests {
         assertThat(result).contains("\"status\":\"success\"");
         assertThat(result).contains("shot.png");
     }
+
+    @Test
+    void shouldMergeNegativePromptIntoSubmittedPrompt() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        ImageGenerationService imageGenerationService = mock(ImageGenerationService.class);
+        ImageGenerationConsumer imageGenerationConsumer = mock(ImageGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder()
+                .id(22L)
+                .code("image-model")
+                .build();
+        when(aiModelService.getDefaultByType(2)).thenReturn(model);
+
+        ImageTask completedTask = ImageTask.builder().id(92L).status(2).build();
+        when(imageGenerationConsumer.submitAndWait(any(ImageTask.class), eq(1800000L))).thenReturn(completedTask);
+        when(imageGenerationService.listItems(92L)).thenReturn(List.of(ImageItem.builder()
+                .status(1)
+                .imageUrl("https://example.test/asset.png")
+                .build()));
+
+        GenerateImageToolExecutor executor = new GenerateImageToolExecutor(
+                aiModelService,
+                imageGenerationService,
+                imageGenerationConsumer,
+                capabilityService,
+                storyboardService);
+
+        executor.execute("{\"prompt\":\"角色设定图\",\"negativePrompt\":\"bad face, crooked eyes\",\"projectId\":100}",
+                ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<ImageTask> taskCaptor = ArgumentCaptor.forClass(ImageTask.class);
+        verify(imageGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(1800000L));
+        assertThat(taskCaptor.getValue().getPrompt())
+                .contains("角色设定图")
+                .contains("反向约束")
+                .contains("bad face, crooked eyes");
+        assertThat(taskCaptor.getValue().getNegativePrompt()).isEqualTo("bad face, crooked eyes");
+    }
 }

@@ -66,6 +66,11 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
         AiModel model = resolveModel(task);
         String modelCode = model != null && StrUtil.isNotBlank(model.getCode()) ? model.getCode() : "wan2.7-image";
         JSONObject config = DashScopeGenerationSupport.parseModelConfig(model);
+        if (isAssetItemTask(task)) {
+            // 资产设定图/三视图需要严格遵循构图和五官约束，平台自动扩写容易引入动作、背景或弱化脸部约束。
+            config.set("promptExtend", false);
+            config.set("prompt_extend", false);
+        }
         int[] size = resolveDefaultSize(model, task);
         String sizeText = resolveSizeText(task, config, size[0], size[1]);
         int count = task.getCount() != null && task.getCount() > 0 ? task.getCount() : 1;
@@ -448,6 +453,10 @@ public class DashScopeImageStrategy implements ImageGenerationStrategy {
             }
         }
         return null;
+    }
+
+    private boolean isAssetItemTask(ImageTask task) {
+        return task != null && StrUtil.startWithIgnoreCase(StrUtil.trim(task.getCategory()), "asset_item:");
     }
 
     private void addIfNotBlank(List<String> urls, String url) {

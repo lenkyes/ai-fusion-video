@@ -160,8 +160,9 @@ public class GenerateImageToolExecutor implements ToolExecutor {
                 AiModel model = resolvePreferredModel();
 
             // 构建生图任务
+            String effectivePrompt = mergeNegativePromptIntoPrompt(prompt, negativePrompt);
             ImageTask task = ImageTask.builder()
-                    .prompt(prompt)
+                    .prompt(effectivePrompt)
                     .negativePrompt(StrUtil.isBlank(negativePrompt) ? null : negativePrompt)
                     .width(width > 0 ? width : null)
                     .height(height > 0 ? height : null)
@@ -176,7 +177,7 @@ public class GenerateImageToolExecutor implements ToolExecutor {
                 generationModelCapabilityService.validateImageTask(model, task);
 
                 log.info("[generate_image] 提交生图任务: prompt={}, size={}x{}, modelId={}, modelCode={}, 参考图: {}",
-                    prompt, width, height, model.getId(), model.getCode(), refImageUrls != null ? "有" : "无");
+                    effectivePrompt, width, height, model.getId(), model.getCode(), refImageUrls != null ? "有" : "无");
 
             // 提交到队列并同步等待结果
             ImageTask completed = imageGenerationConsumer.submitAndWait(task, WAIT_TIMEOUT_MS);
@@ -240,6 +241,18 @@ public class GenerateImageToolExecutor implements ToolExecutor {
 
     private Long positiveLong(Long value) {
         return value != null && value > 0 ? value : null;
+    }
+
+    private String mergeNegativePromptIntoPrompt(String prompt, String negativePrompt) {
+        if (StrUtil.isBlank(negativePrompt)) {
+            return prompt;
+        }
+        String trimmedPrompt = StrUtil.trim(prompt);
+        String trimmedNegative = StrUtil.trim(negativePrompt);
+        if (StrUtil.containsIgnoreCase(trimmedPrompt, trimmedNegative)) {
+            return trimmedPrompt;
+        }
+        return trimmedPrompt + "\n\n反向约束（必须严格避免，不要生成以下内容）: " + trimmedNegative;
     }
 
     private String storyboardItemCategory(Long storyboardItemId) {

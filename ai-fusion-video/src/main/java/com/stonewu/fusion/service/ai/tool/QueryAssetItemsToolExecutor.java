@@ -66,7 +66,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                 2. 按 assetId 精确查询单个
                 3. 按 assetName + projectId 模糊匹配主资产名称
 
-                返回每个资产的子资产列表，包含 id、name、itemType、imageUrl、thumbnailUrl、properties。
+                返回每个资产的基础信息、properties、aiPrompt，以及子资产列表（id、name、itemType、imageUrl、thumbnailUrl、properties、aiPrompt）。
                 """;
     }
 
@@ -233,7 +233,8 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                     .set("itemType", item.getItemType())
                     .set("imageUrl", item.getImageUrl())
                     .set("thumbnailUrl", item.getThumbnailUrl())
-                    .set("properties", item.getProperties()));
+                    .set("properties", item.getProperties())
+                    .set("aiPrompt", item.getAiPrompt()));
         }
 
         return JSONUtil.createObj()
@@ -241,6 +242,8 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                 .set("assetName", asset.getName())
                 .set("assetType", asset.getType())
                 .set("assetDescription", asset.getDescription())
+                .set("assetProperties", asset.getProperties())
+                .set("assetAiPrompt", asset.getAiPrompt())
                 .set("totalItems", items.size())
                 .set("items", itemsArray);
     }
