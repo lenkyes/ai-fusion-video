@@ -443,13 +443,15 @@ public class AiAgentRegistry {
                                                                                 - assetId: 主资产ID（数字，必传）
                                                                                 - itemId: 子资产ID（数字，必传）
                                                                                 - projectId: 项目ID（数字，必传）
+                                                                                - characterCanonicalMode: 是否使用角色基础母版模式（true/false，可选；角色 initial/three_view 传 true）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
 
                                                                                 message 格式示例：
                                                                                 请为子资产生成图片。
                                                                                 assetId: 1
                                                                                 itemId: 3
-                                                                                projectId: 5""")
+                                                                                projectId: 5
+                                                                                characterCanonicalMode: true""")
                                                                 .refAgentType("asset_image_executor")
                                                                 .build()))
                                 .systemPrompt(loadPrompt("asset-image-generation.system.md"))
@@ -523,12 +525,12 @@ public class AiAgentRegistry {
                                                                                 styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
                                                                                 referenceOrderPolicy: {视频参考图只包含角色、场景、关键道具等资产图；不要传项目预设画风图、/api/art-styles/** 或 /art-styles/**；角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
                                                                                 characterLocks:
-                                                                                - {角色名}: assetItemId={子资产ID}, itemType={three_view/variant/initial}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定外观锚点；three_view 只用于锁定正/侧/背外观}
+                                                                                - {角色名}: assetItemId={子资产ID}, itemType={three_view/variant/initial}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定外观锚点；three_view 用于锁定正/侧/背外观和最右侧脸部表情特写中的脸部特征}
                                                                                 sceneLocks:
                                                                                 - {场景名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, environment={来自资产/分镜的稳定空间结构和光线锚点}
                                                                                 propLocks:
                                                                                 - {道具名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定道具外观锚点}
-                                                                                negativeConsistencyRules: 保持同一角色外貌和服装、同一场景空间结构、同一道具外观；不新增无关人物；不保留参考图白底、边框或三视图分栏""")
+                                                                                negativeConsistencyRules: 保持同一角色外貌和服装、同一场景空间结构、同一道具外观；不新增无关人物；不保留参考图白底、边框、三视图/四栏参考表分栏或脸部特写小栏""")
                                                                 .refAgentType("storyboard_video_executor")
                                                                 .build()))
                                 .systemPrompt(loadPrompt("storyboard-video-gen.system.md"))

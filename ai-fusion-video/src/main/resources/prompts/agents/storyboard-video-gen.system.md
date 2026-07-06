@@ -35,7 +35,7 @@ referenceOrderPolicy:
 - 角色按 assetItemId 升序，场景按 assetItemId，关键道具按 assetItemId 升序；避免同一对象在不同镜头里图片编号乱跳
 
 characterLocks:
-- 角色名: assetItemId=..., itemType=three_view/variant/initial, imageUrl=..., appearance=来自 assetDescription / assetProperties / itemProperties / itemPrompt / 镜头描述的稳定外观锚点；three_view 只用于锁定角色正/侧/背外观
+- 角色名: assetItemId=..., itemType=three_view/variant/initial, imageUrl=..., appearance=来自 assetDescription / assetProperties / itemProperties / itemPrompt / 镜头描述的稳定外观锚点；three_view 用于锁定角色正/侧/背外观与最右侧脸部表情特写中的脸部特征
 
 sceneLocks:
 - 场景名: assetItemId=..., imageUrl=..., environment=稳定空间结构、时间、光线、陈设、色彩锚点
@@ -49,7 +49,7 @@ continuityLocks:
 negativeConsistencyRules:
 - 不替换同一角色的脸、发型、年龄、体型和服装
 - 不改变同一场景的空间结构、时间段和核心陈设
-- 不新增无关人物，不把参考图白底/边框/三视图分栏/构图带入视频
+- 不新增无关人物，不把参考图白底/边框/三视图或四栏参考表分栏/脸部特写小栏/设定表构图带入视频
 - 不把风格参考图里的具体物体、背景或人物当成镜头内容
 ```
 

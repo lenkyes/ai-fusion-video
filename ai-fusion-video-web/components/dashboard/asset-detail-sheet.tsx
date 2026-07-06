@@ -84,6 +84,23 @@ function isSameMediaUrl(a?: string | null, b?: string | null) {
   return rawA === rawB || normalizeMediaUrl(rawA) === normalizeMediaUrl(rawB);
 }
 
+const CHARACTER_BASE_ITEM_TYPES = new Set(["initial", "three_view"]);
+
+function resolveRegenerationItemIds(items: AssetItem[], targetItem: AssetItem, assetType: string) {
+  const targetType = targetItem.itemType || "";
+  if (assetType !== "character" || !CHARACTER_BASE_ITEM_TYPES.has(targetType)) {
+    return [targetItem.id];
+  }
+
+  const threeViewItem = items.find((entry) => entry.itemType === "three_view");
+  const initialItem = items.find((entry) => entry.itemType === "initial");
+  const orderedIds = [threeViewItem?.id, initialItem?.id, targetItem.id].filter(
+    (id): id is number => typeof id === "number"
+  );
+
+  return [...new Set(orderedIds)];
+}
+
 const assetTypeOptions = [
   { value: "character", label: "角色" },
   { value: "scene", label: "场景" },
@@ -293,6 +310,7 @@ function CoverSelectorDialog({
 // ========== 子资产编辑面板（滑入式） ==========
 function AssetItemEditPanel({
   item,
+  items,
   assetId,
   assetType,
   projectId,
@@ -301,6 +319,7 @@ function AssetItemEditPanel({
   onDeleted,
 }: {
   item: AssetItem;
+  items: AssetItem[];
   assetId: number;
   assetType: string;
   projectId: number;
@@ -418,6 +437,11 @@ function AssetItemEditPanel({
 
     let handled = false;
     setGenerating(true);
+    const selectedAssetItemIds = resolveRegenerationItemIds(items, item, assetType);
+    const linkedCharacterBaseMessage =
+      selectedAssetItemIds.length > 1
+        ? "角色基础图需要保持一致：请先生成三视图，再用三视图生成主图。"
+        : "";
 
     const { addPipeline, setNotificationOpen } = usePipelineStore.getState();
     addPipeline({
@@ -426,10 +450,10 @@ function AssetItemEditPanel({
       request: {
         agentType: "asset_image_gen",
         projectId,
-        message: `请${imageUrl ? "重新生成并替换" : "生成"}子资产「${item.name || item.id}」的图片，只处理指定子资产。`,
+        message: `请${imageUrl ? "重新生成并替换" : "生成"}子资产「${item.name || item.id}」的图片，只处理指定子资产。${linkedCharacterBaseMessage}`,
         context: {
           selectedAssetIds: [assetId],
-          selectedAssetItemIds: [item.id],
+          selectedAssetItemIds,
         },
       },
       onComplete: async () => {
@@ -447,7 +471,7 @@ function AssetItemEditPanel({
       },
     });
     setNotificationOpen(true);
-  }, [assetId, generating, imageUrl, item.id, item.name, onUpdated, projectId]);
+  }, [assetId, assetType, generating, imageUrl, item, items, onUpdated, projectId]);
 
   return (
     <div className="h-full flex flex-col">
@@ -1004,6 +1028,11 @@ export default function AssetDetailPanel(props: Props) {
 
     let handled = false;
     setCoverRegenerating(true);
+    const selectedAssetItemIds = resolveRegenerationItemIds(items, targetItem, asset.type);
+    const linkedCharacterBaseMessage =
+      selectedAssetItemIds.length > 1
+        ? "角色基础图需要保持一致：请先生成三视图，再用三视图生成主图，最终封面使用目标子资产的新图。"
+        : "";
 
     const { addPipeline, setNotificationOpen } = usePipelineStore.getState();
     addPipeline({
@@ -1012,10 +1041,10 @@ export default function AssetDetailPanel(props: Props) {
       request: {
         agentType: "asset_image_gen",
         projectId: asset.projectId,
-        message: `请重新生成资产「${asset.name}」的封面图，只处理指定的子资产，生成成功后替换原图。`,
+        message: `请重新生成资产「${asset.name}」的封面图，只处理指定的子资产，生成成功后替换原图。${linkedCharacterBaseMessage}`,
         context: {
           selectedAssetIds: [asset.id],
-          selectedAssetItemIds: [targetItem.id],
+          selectedAssetItemIds,
         },
       },
       onComplete: async () => {
@@ -1045,7 +1074,7 @@ export default function AssetDetailPanel(props: Props) {
       },
     });
     setNotificationOpen(true);
-  }, [asset, coverRegenerating, onSaved, resolveCoverRegenerateTarget]);
+  }, [asset, coverRegenerating, items, onSaved, resolveCoverRegenerateTarget]);
 
   const handleSave = async () => {
     if (!asset) return;
@@ -1545,6 +1574,7 @@ export default function AssetDetailPanel(props: Props) {
           <AssetItemEditPanel
             key={selectedItem.id}
             item={selectedItem}
+            items={items}
             assetId={asset.id}
             assetType={asset.type}
             projectId={asset.projectId}

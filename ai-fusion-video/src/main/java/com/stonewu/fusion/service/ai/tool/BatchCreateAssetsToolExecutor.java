@@ -59,7 +59,7 @@ public class BatchCreateAssetsToolExecutor implements ToolExecutor {
                         - 单次最多创建 %d 个资产，超出请分次调用
                         - assets 数组中每项必须包含 type 和 name
                         - 支持的资产类型：character（角色）、scene（场景）、prop（道具）
-                        - 角色资产会自动拥有 `initial`（默认正面设定图）和 `three_view`（正/侧/背三视图）两个基础子资产；复用已有角色时也会补齐缺失的 `three_view`
+                        - 角色资产会自动拥有 `initial`（默认正面设定图）和 `three_view`（正/侧/背全身 + 脸部表情特写参考表）两个基础子资产；复用已有角色时也会补齐缺失的 `three_view`
                         - properties 必须包含 query_asset_metadata 返回的**所有** fieldKey，每个 key 都必须填写，确实无法确定的填'无'。填写内容严格遵循对应 fieldDescription 中的要求
                         - 每个资产必须提供 initialItem 填充初始子资产的 name 和 properties（properties 同样须包含所有 fieldKey，无值填'无'）
 

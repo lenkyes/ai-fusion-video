@@ -51,7 +51,7 @@ public class AssetCreateToolExecutor implements ToolExecutor {
                 1. name 不要重复，创建前建议先用 list_project_assets 查看已有资产
                 2. 如需批量创建，请使用 batch_create_assets 工具
                 3. 创建资产后会自动生成一个与资产同名的初始子资产（itemType=initial），无需手动创建
-                4. 创建角色资产（type=character）时还会自动生成一个三视图子资产（itemType=three_view），用于后续生成正/侧/背角色参考图
+                4. 创建角色资产（type=character）时还会自动生成一个三视图子资产（itemType=three_view），用于后续生成正/侧/背全身 + 脸部表情特写的角色参考图
 
                 **角色命名规范**：
                 - 每个角色资产只使用一个名称，以该角色在剧情中最主要/最常出现的名字为准

@@ -54,7 +54,7 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
         return String.format("""
                 为指定主资产批量创建子资产变体。
                 每个主资产创建时会自动生成一个**初始子资产**（默认变体），图片挂在子资产上而非主资产。
-                角色资产还应拥有一个 itemType=three_view 的基础三视图子资产，用于生成正面/侧面/背面同屏角色参考图。
+                角色资产还应拥有一个 itemType=three_view 的基础三视图子资产，用于生成正面/侧面/背面全身 + 脸部表情特写同屏的角色参考图。
                 新建子资产变体代表角色/场景在**外观上有显著变化**的其他版本，每个子资产对应一张独立的参考图片。
 
                 **何时需要创建新子资产（外观发生显著变化）**：
@@ -102,7 +102,7 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                 2. 工具自动按 assetId + name 去重，已存在的同名子资产会被复用
                 3. 子资产的 properties 仅填写该子资产特有的属性值，不要重复主资产已有的 properties
                 4. 调用前应先使用 query_asset_items 查看已有子资产，避免重复创建
-                5. 角色三视图请使用 itemType=three_view，名称建议为"角色名 三视图"，properties 可沿用角色基础外貌属性
+                5. 角色三视图请使用 itemType=three_view，名称建议为"角色名 三视图"，内容是正/侧/背全身 + 脸部表情特写参考表，properties 可沿用角色基础外貌属性
                 6. 宁可少创建，不要多创建。对于不确定是否需要的变体，优先复用初始子资产
 
                 返回值：
