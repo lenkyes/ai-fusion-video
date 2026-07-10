@@ -522,6 +522,11 @@ public class AiAssistantService {
             template = template.replace("{projectId}", String.valueOf(reqVO.getProjectId()));
         }
 
+        if (template.contains("{storyboardDurationRule}")) {
+            template = template.replace("{storyboardDurationRule}",
+                    StoryboardDurationContext.buildPromptRule(reqVO.getContext()));
+        }
+
         // 2. 注入 autoReferences 中的上下文 ID
         if (CollUtil.isNotEmpty(reqVO.getAutoReferences())) {
             for (AiReferenceVO ref : reqVO.getAutoReferences()) {
@@ -575,6 +580,9 @@ public class AiAssistantService {
                 .userId(userId)
                 .ownerType(1)
                 .ownerId(userId)
+                .requestContext(reqVO.getContext() == null || reqVO.getContext().isEmpty()
+                        ? Map.of()
+                        : Collections.unmodifiableMap(new LinkedHashMap<>(reqVO.getContext())))
                 .build();
 
         List<ToolCallback> callbacks = new ArrayList<>();

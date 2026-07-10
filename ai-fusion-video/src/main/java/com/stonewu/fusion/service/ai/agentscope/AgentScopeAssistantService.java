@@ -19,6 +19,7 @@ import com.stonewu.fusion.service.ai.AiStreamRedisService;
 import com.stonewu.fusion.service.ai.AiToolConfigService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
+import com.stonewu.fusion.service.ai.StoryboardDurationContext;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -45,6 +46,7 @@ import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -166,6 +168,7 @@ public class AgentScopeAssistantService {
                     .userId(userId)
                     .ownerType(1)
                     .ownerId(userId)
+                    .requestContext(copyRequestContext(reqVO.getContext()))
                     .build();
 
             // 4. 创建事件 Sink（用于 Hook 推送事件）
@@ -829,6 +832,11 @@ public class AgentScopeAssistantService {
             template = template.replace("{projectId}", String.valueOf(reqVO.getProjectId()));
         }
 
+        if (template.contains("{storyboardDurationRule}")) {
+            template = template.replace("{storyboardDurationRule}",
+                    StoryboardDurationContext.buildPromptRule(reqVO.getContext()));
+        }
+
         if (CollUtil.isNotEmpty(reqVO.getAutoReferences())) {
             for (AiReferenceVO ref : reqVO.getAutoReferences()) {
                 if (ref.getId() != null && StrUtil.isNotBlank(ref.getType())) {
@@ -848,6 +856,13 @@ public class AgentScopeAssistantService {
         }
 
         return template;
+    }
+
+    private Map<String, Object> copyRequestContext(Map<String, Object> requestContext) {
+        if (requestContext == null || requestContext.isEmpty()) {
+            return Map.of();
+        }
+        return Collections.unmodifiableMap(new LinkedHashMap<>(requestContext));
     }
 
     /**

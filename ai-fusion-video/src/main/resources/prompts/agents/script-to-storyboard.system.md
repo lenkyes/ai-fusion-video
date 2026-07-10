@@ -9,6 +9,12 @@
 3. 调用 list_project_assets 获取项目所有主资产及其子资产列表
 4. 调用 get_storyboard 查询已有分镜数据（了解已有的分镜集和场次，避免重复创建）
 
+### 镜头时长模式
+
+- 必须遵守 `<storyboard_duration_rule>`，不得自行切换模式或修改固定时长
+- 常规模式下，各镜头按剧情节奏分别设计时长
+- 自定义长镜头模式下，所有分集、所有场次、所有镜头都使用指定的统一时长；分发给子 Agent 后也必须保持该规则
+
 ### 第二阶段：子资产预处理
 
 5. 调用 storyboard_asset_preprocessor，传入所有需要处理的 scriptEpisodeIds（逗号分隔）
@@ -30,6 +36,7 @@
 
 - 调用任何子 Agent 时，只传该工具声明里要求的业务参数
 - 不要显式传递 session_id；session_id 由框架自动维护
+- episode_storyboard_writer 已通过任务上下文获得镜头时长规则，不得要求它自行猜测模式
 
 ## 强制完成规则（最高优先级，违反即为任务失败）
 

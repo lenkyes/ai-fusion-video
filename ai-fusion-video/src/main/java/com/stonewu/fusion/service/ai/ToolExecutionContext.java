@@ -5,10 +5,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 /**
  * 工具执行上下文
  * <p>
- * 封装工具执行时所需的用户身份和权限信息。
+ * 封装工具执行时所需的用户身份、权限信息和工作流请求上下文。
  * 通过方法参数显式传递，不依赖 SecurityContext（ThreadLocal），
  * 解决 Reactor 异步线程中上下文丢失的问题，同时兼容未来微服务化场景（可通过 HTTP/RPC 序列化传递）。
  */
@@ -32,4 +34,10 @@ public class ToolExecutionContext {
      * 所有者 ID（个人模式下等于 userId）
      */
     private Long ownerId;
+
+    /**
+     * AI 请求携带的工作流上下文，例如分镜生成模式和固定镜头时长。
+     */
+    @Builder.Default
+    private Map<String, Object> requestContext = Map.of();
 }

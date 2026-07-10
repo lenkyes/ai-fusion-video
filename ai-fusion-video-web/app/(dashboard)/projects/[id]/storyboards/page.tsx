@@ -41,6 +41,10 @@ import { StoryboardTableView } from "./_components/storyboard-table-view";
 import { StoryboardCardView } from "./_components/storyboard-card-view";
 import { StoryboardRefPanel } from "./_components/storyboard-ref-panel";
 import { CreateStoryboardDialog } from "./_components/create-dialog";
+import {
+  GenerateStoryboardDialog,
+  type StoryboardGenerationOptions,
+} from "./_components/generate-storyboard-dialog";
 import { EditItemAssetsDialog } from "./_components/edit-assets-dialog";
 import { assetApi } from "@/lib/api/asset";
 import { useFullWidth } from "@/lib/hooks/use-layout";
@@ -92,6 +96,8 @@ export default function StoryboardTabPage() {
   const [loading, setLoading] = useState(true);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showGenerateStoryboardDialog, setShowGenerateStoryboardDialog] =
+    useState(false);
 
   // 关联资产状态
   const [assetsList, setAssetsList] = useState<import("@/lib/api/asset").AssetWithItems[]>([]);
@@ -265,16 +271,17 @@ export default function StoryboardTabPage() {
     loadStoryboard();
   }, [loadStoryboard]);
 
-  const handleAiStoryboard = useCallback(async () => {
+  const handleAiStoryboard = useCallback(async (
+    options: StoryboardGenerationOptions
+  ) => {
+    const scripts = await scriptApi.list(projectId);
+    const currentScript = scripts[0] ?? null;
+
+    if (!currentScript) {
+      throw new Error("请先创建剧本后再使用 AI 生成分镜");
+    }
+
     try {
-      const scripts = await scriptApi.list(projectId);
-      const currentScript = scripts[0] ?? null;
-
-      if (!currentScript) {
-        alert("请先创建剧本后再使用 AI 生成分镜");
-        return;
-      }
-
       const storyboardTitle =
         currentScript.title?.trim() || project?.name?.trim() || "AI 分镜";
       const scriptDisplayTitle =
@@ -297,6 +304,8 @@ export default function StoryboardTabPage() {
           context: {
             scriptId: currentScript.id,
             storyboardId: newStoryboard.id,
+            storyboardMode: options.storyboardMode,
+            shotDuration: options.shotDuration,
           },
         },
         onComplete: () => {
@@ -309,7 +318,7 @@ export default function StoryboardTabPage() {
       await loadStoryboard();
     } catch (err) {
       console.error("创建分镜记录失败:", err);
-      alert("创建分镜记录失败，请重试");
+      throw new Error("创建分镜记录失败，请重试");
     }
   }, [
     addPipeline,
@@ -945,7 +954,7 @@ export default function StoryboardTabPage() {
               手动创建
             </button>
             <button
-              onClick={handleAiStoryboard}
+              onClick={() => setShowGenerateStoryboardDialog(true)}
               className={cn(
                 "flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium",
                 "bg-linear-to-r from-cyan-600 to-blue-600",
@@ -965,6 +974,11 @@ export default function StoryboardTabPage() {
           projectName={project?.name}
           onClose={() => setShowCreateDialog(false)}
           onCreated={loadStoryboard}
+        />
+        <GenerateStoryboardDialog
+          open={showGenerateStoryboardDialog}
+          onClose={() => setShowGenerateStoryboardDialog(false)}
+          onConfirm={handleAiStoryboard}
         />
       </>
     );

@@ -320,6 +320,7 @@ public class AiAgentRegistry {
                                                 <project_id>{projectId}</project_id>
                                                 <storyboard_id>{storyboardId}</storyboard_id>
                                                 <script_id>{scriptId}</script_id>
+                                                <storyboard_duration_rule>{storyboardDurationRule}</storyboard_duration_rule>
                                                 </task_context>""")
                                 .defaultUserMessage("请根据项目 {projectId} 的剧本（ID: {scriptId}），将结构化剧本数据转换为分镜表。")
                                 .enableTools(1)
@@ -387,6 +388,7 @@ public class AiAgentRegistry {
                                                 <project_id>{projectId}</project_id>
                                                 <storyboard_id>{storyboardId}</storyboard_id>
                                                 <script_id>{scriptId}</script_id>
+                                                <storyboard_duration_rule>{storyboardDurationRule}</storyboard_duration_rule>
                                                 </task_context>
 
                                                 请根据主 Agent 提供的 episodeId，查询该集剧本内容并设计分镜。""")

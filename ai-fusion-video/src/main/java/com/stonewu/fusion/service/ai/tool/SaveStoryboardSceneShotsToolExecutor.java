@@ -5,6 +5,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.entity.storyboard.StoryboardScene;
+import com.stonewu.fusion.service.ai.StoryboardDurationContext;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
@@ -110,7 +111,7 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
                                     },
                                     "duration": {
                                         "type": "number",
-                                        "description": "预估时长（秒）"
+                                        "description": "预估时长（秒）；自定义长镜头模式下保存层会统一使用请求上下文中的 shotDuration"
                                     },
                                     "dialogue": {
                                         "type": "string",
@@ -202,46 +203,33 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
                 return JSONUtil.createObj().set("status", "error").set("message", "缺少 shots 或为空").toString();
             }
 
-            // 1. 创建分镜场次
-            StoryboardScene scene = StoryboardScene.builder()
-                    .storyboardId(storyboardId)
-                    .episodeId(storyboardEpisodeId)
-                    .sceneNumber(sceneNumber)
-                    .sceneHeading(params.getStr("sceneHeading"))
-                    .location(params.getStr("location"))
-                    .timeOfDay(params.getStr("timeOfDay"))
-                    .intExt(params.getStr("intExt"))
-                    .sortOrder(params.getInt("sortOrder", 0))
-                    .status(1)
-                    .build();
+            // 在任何落库操作前校验，避免无效的自定义时长留下空场次。
+            BigDecimal fixedShotDuration = StoryboardDurationContext.resolveFixedDuration(
+                    context != null ? context.getRequestContext() : null);
 
-            StoryboardScene savedScene = storyboardService.createScene(scene);
-            log.info("[save_storyboard_scene_shots] 场次创建成功: sceneId={}, sceneNumber={}",
-                    savedScene.getId(), sceneNumber);
-
-            // 2. 批量创建镜头
+            // 1. 先构建并校验全部镜头
             List<StoryboardItem> items = new ArrayList<>();
             for (int i = 0; i < shotsArr.size(); i++) {
                 JSONObject shot = shotsArr.getJSONObject(i);
 
-                // 处理角色子资产ID列表
                 String characterIdsJson = null;
                 JSONArray charArray = shot.getJSONArray("characterIds");
                 if (charArray != null) {
                     characterIdsJson = charArray.toString();
                 }
 
-                // 处理道具子资产ID列表
                 String propIdsJson = null;
                 JSONArray propArray = shot.getJSONArray("propIds");
                 if (propArray != null) {
                     propIdsJson = propArray.toString();
                 }
 
+                BigDecimal shotDuration = fixedShotDuration != null
+                        ? fixedShotDuration
+                        : parseShotDuration(shot);
                 StoryboardItem item = StoryboardItem.builder()
                         .storyboardId(storyboardId)
                         .storyboardEpisodeId(storyboardEpisodeId)
-                        .storyboardSceneId(savedScene.getId())
                         .sortOrder(i)
                         .shotNumber(String.valueOf(i + 1))
                         .shotType(shot.getStr("shotType"))
@@ -260,13 +248,34 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
                         .sceneAssetItemId(shot.getLong("sceneAssetItemId"))
                         .propIds(propIdsJson)
                         .remark(shot.getStr("remark"))
-                        .duration(shot.get("duration") != null ? new BigDecimal(shot.getStr("duration")) : null)
+                        .duration(shotDuration)
                         .aiGenerated(true)
                         .status(1)
                         .build();
                 items.add(item);
             }
 
+            // 2. 创建分镜场次
+            StoryboardScene scene = StoryboardScene.builder()
+                    .storyboardId(storyboardId)
+                    .episodeId(storyboardEpisodeId)
+                    .sceneNumber(sceneNumber)
+                    .sceneHeading(params.getStr("sceneHeading"))
+                    .location(params.getStr("location"))
+                    .timeOfDay(params.getStr("timeOfDay"))
+                    .intExt(params.getStr("intExt"))
+                    .sortOrder(params.getInt("sortOrder", 0))
+                    .status(1)
+                    .build();
+
+            StoryboardScene savedScene = storyboardService.createScene(scene);
+            log.info("[save_storyboard_scene_shots] 场次创建成功: sceneId={}, sceneNumber={}",
+                    savedScene.getId(), sceneNumber);
+
+            // 3. 关联已创建的场次并批量保存镜头
+            for (StoryboardItem item : items) {
+                item.setStoryboardSceneId(savedScene.getId());
+            }
             storyboardService.batchCreateItems(items);
             log.info("[save_storyboard_scene_shots] 镜头批量创建成功: sceneId={}, count={}",
                     savedScene.getId(), items.size());
@@ -276,10 +285,19 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
                     .set("storyboardSceneId", savedScene.getId())
                     .set("sceneNumber", sceneNumber)
                     .set("shotCount", items.size())
+                    .set("durationMode", fixedShotDuration != null ? "custom" : "regular")
+                    .set("shotDuration", fixedShotDuration)
                     .set("message", "场次分镜保存成功，共 " + items.size() + " 个镜头").toString();
+        } catch (IllegalArgumentException e) {
+            log.warn("保存场次分镜参数校验失败: {}", e.getMessage());
+            return JSONUtil.createObj().set("status", "error").set("message", "参数错误: " + e.getMessage()).toString();
         } catch (Exception e) {
             log.error("保存场次分镜失败", e);
             return JSONUtil.createObj().set("status", "error").set("message", "操作失败: " + e.getMessage()).toString();
         }
+    }
+
+    private BigDecimal parseShotDuration(JSONObject shot) {
+        return shot.get("duration") != null ? new BigDecimal(shot.getStr("duration")) : null;
     }
 }

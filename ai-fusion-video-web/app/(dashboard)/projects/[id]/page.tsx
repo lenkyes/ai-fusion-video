@@ -39,6 +39,10 @@ import { useProject } from "./project-context";
 import { CreateScriptDialog } from "@/components/dashboard/create-script-dialog";
 import { ParseScriptDialog } from "@/components/dashboard/parse-script-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
+import {
+  GenerateStoryboardDialog,
+  type StoryboardGenerationOptions,
+} from "./storyboards/_components/generate-storyboard-dialog";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -104,6 +108,10 @@ export default function ProjectOverviewPage() {
   const [storyboardItemCount, setStoryboardItemCount] = useState(0);
   const [loadingStoryboard, setLoadingStoryboard] = useState(true);
   const [deletingStoryboard, setDeletingStoryboard] = useState(false);
+  const [showGenerateStoryboardDialog, setShowGenerateStoryboardDialog] =
+    useState(false);
+  const [storyboardGenerationIntent, setStoryboardGenerationIntent] =
+    useState<"create" | "reparse">("create");
 
   // 画风预设
   const [artPresets, setArtPresets] = useState<ArtStylePreset[]>([]);
@@ -247,12 +255,21 @@ export default function ProjectOverviewPage() {
   };
 
   // AI 生成分镜：启动 pipeline
-  const handleAiStoryboard = async () => {
-    if (!script) return;
+  const handleAiStoryboard = async (
+    options: StoryboardGenerationOptions,
+    replaceExisting = false
+  ) => {
+    if (!script) {
+      throw new Error("请先创建剧本后再使用 AI 生成分镜");
+    }
 
     const scriptDisplayTitle = script.title?.trim() || project?.name?.trim() || "未命名项目";
 
     try {
+      if (replaceExisting && storyboard) {
+        await storyboardApi.delete(storyboard.id);
+      }
+
       // 先创建分镜记录，获取 storyboardId
       const newStoryboard = await storyboardApi.create({
         projectId,
@@ -268,7 +285,12 @@ export default function ProjectOverviewPage() {
           category: "pipeline",
           title: `AI 生成分镜：${scriptDisplayTitle}`,
           projectId,
-          context: { scriptId: script.id, storyboardId: newStoryboard.id },
+          context: {
+            scriptId: script.id,
+            storyboardId: newStoryboard.id,
+            storyboardMode: options.storyboardMode,
+            shotDuration: options.shotDuration,
+          },
         },
         onComplete: () => {
           // pipeline 完成后刷新数据
@@ -283,9 +305,23 @@ export default function ProjectOverviewPage() {
       // 跳转到分镜页
       router.push(`/projects/${projectId}/storyboards`);
     } catch (err) {
-      console.error("创建分镜记录失败:", err);
-      alert("创建分镜记录失败，请重试");
+      console.error(replaceExisting ? "重新生成分镜失败:" : "创建分镜记录失败:", err);
+      if (replaceExisting) {
+        void loadAllData();
+      }
+      throw new Error(replaceExisting ? "重新生成分镜失败，请重试" : "创建分镜记录失败，请重试");
     }
+  };
+
+  const openGenerateStoryboardDialog = (
+    intent: "create" | "reparse"
+  ) => {
+    if (!script) {
+      alert("请先创建剧本后再使用 AI 生成分镜");
+      return;
+    }
+    setStoryboardGenerationIntent(intent);
+    setShowGenerateStoryboardDialog(true);
   };
 
   if (loading && loadingStoryboard) {
@@ -617,19 +653,7 @@ export default function ProjectOverviewPage() {
                 查看分镜
               </button>
               <button
-                onClick={async () => {
-                  if (!script) {
-                    alert("请先创建剧本后再生成分镜");
-                    return;
-                  }
-                  if (!confirm("重新解析将删除当前分镜及其所有集、场次和镜头数据，确定继续？")) return;
-                  try {
-                    await storyboardApi.delete(storyboard!.id);
-                    handleAiStoryboard();
-                  } catch (err) {
-                    console.error("删除旧分镜失败:", err);
-                  }
-                }}
+                onClick={() => openGenerateStoryboardDialog("reparse")}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium",
                   "bg-linear-to-r from-purple-600 to-pink-600",
@@ -682,13 +706,7 @@ export default function ProjectOverviewPage() {
             </div>
             {/* AI 生成 */}
             <div
-              onClick={() => {
-                if (!script) {
-                  alert("请先创建剧本后再使用 AI 生成分镜");
-                  return;
-                }
-                handleAiStoryboard();
-              }}
+              onClick={() => openGenerateStoryboardDialog("create")}
               className={cn(
                 "rounded-xl border border-dashed border-border/40 p-10",
                 "flex flex-col items-center justify-center text-center",
@@ -706,6 +724,18 @@ export default function ProjectOverviewPage() {
           </div>
         )}
       </motion.div>
+
+      <GenerateStoryboardDialog
+        open={showGenerateStoryboardDialog}
+        intent={storyboardGenerationIntent}
+        onClose={() => setShowGenerateStoryboardDialog(false)}
+        onConfirm={(options) =>
+          handleAiStoryboard(
+            options,
+            storyboardGenerationIntent === "reparse"
+          )
+        }
+      />
 
       {/* 资产概览区域 */}
       <motion.div variants={itemVariants} className="mt-10 pb-8">
