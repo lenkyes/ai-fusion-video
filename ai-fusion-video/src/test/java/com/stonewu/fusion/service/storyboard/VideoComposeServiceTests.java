@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.stonewu.fusion.entity.storage.StorageConfig;
 import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
+import com.stonewu.fusion.entity.storyboard.StoryboardScene;
 import com.stonewu.fusion.mapper.storyboard.StoryboardEpisodeMapper;
+import com.stonewu.fusion.mapper.storyboard.StoryboardSceneMapper;
 import com.stonewu.fusion.service.storage.MediaStorageService;
 import com.stonewu.fusion.service.storage.StorageConfigService;
 import com.stonewu.fusion.service.task.TaskStreamService;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.CacheManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
@@ -40,6 +43,9 @@ class VideoComposeServiceTests {
     private StoryboardEpisodeMapper episodeMapper;
 
     @Mock
+    private StoryboardSceneMapper sceneMapper;
+
+    @Mock
     private MediaStorageService mediaStorageService;
 
     @Mock
@@ -47,6 +53,9 @@ class VideoComposeServiceTests {
 
     @Mock
     private TaskStreamService taskStreamService;
+
+    @Mock
+    private CacheManager cacheManager;
 
     @Mock
     private Executor videoComposeExecutor;
@@ -58,9 +67,11 @@ class VideoComposeServiceTests {
         videoComposeService = new VideoComposeService(
                 storyboardService,
                 episodeMapper,
+                sceneMapper,
                 mediaStorageService,
                 storageConfigService,
                 taskStreamService,
+                cacheManager,
                 videoComposeExecutor
         );
         ReflectionTestUtils.setField(videoComposeService, "mediaLocalPath", "D:/media-root");
@@ -107,6 +118,29 @@ class VideoComposeServiceTests {
 
         assertThat(taskId).isEqualTo("task-1");
         verify(episodeMapper).update(eq(null), any(UpdateWrapper.class));
+        verify(videoComposeExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void submitSceneComposeUsesSceneScopeWhenVideoExists() {
+        when(sceneMapper.selectById(101L)).thenReturn(StoryboardScene.builder()
+                .id(101L)
+                .episodeId(11L)
+                .storyboardId(21L)
+                .sceneHeading("客厅")
+                .build());
+        when(storyboardService.getById(21L)).thenReturn(Storyboard.builder().id(21L).projectId(31L).build());
+        when(taskStreamService.createTask(eq(99L), eq(31L), eq("storyboard_scene_compose"), any(String.class), eq("storyboard_scene"), eq(101L), any(String.class)))
+                .thenReturn("task-scene-1");
+        when(storyboardService.listItemsByScene(101L)).thenReturn(List.of(
+                com.stonewu.fusion.entity.storyboard.StoryboardItem.builder().id(201L).sortOrder(0).videoUrl("/media/videos/demo.mp4").build()
+        ));
+        when(sceneMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
+
+        String taskId = videoComposeService.submitSceneCompose(101L, 99L);
+
+        assertThat(taskId).isEqualTo("task-scene-1");
+        verify(sceneMapper).update(eq(null), any(UpdateWrapper.class));
         verify(videoComposeExecutor).execute(any(Runnable.class));
     }
 

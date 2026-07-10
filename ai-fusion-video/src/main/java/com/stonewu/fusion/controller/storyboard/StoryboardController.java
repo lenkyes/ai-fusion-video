@@ -135,6 +135,15 @@ public class StoryboardController {
 
     // ========== 分镜场次 ==========
 
+    @Operation(summary = "提交场次合成视频任务（异步）")
+    @PostMapping("/scene/{id}/compose-video")
+    public CommonResult<String> composeSceneVideo(@PathVariable Long id,
+                                                  @RequestBody(required = false) ComposeEpisodeVideoReqVO reqVO) {
+        Long userId = requireCurrentUserId();
+        return CommonResult.success(videoComposeService.submitSceneCompose(id, userId,
+                VideoComposeService.ComposeOptions.from(reqVO)));
+    }
+
     @Operation(summary = "获取分镜场次列表（按集）")
     @GetMapping("/episode/{episodeId}/scenes")
     public CommonResult<List<StoryboardScene>> listScenesByEpisode(@PathVariable Long episodeId) {

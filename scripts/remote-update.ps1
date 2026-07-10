@@ -22,6 +22,11 @@ Deploy the local backend and frontend source folders to a remote Docker host.
 Default incremental deployment keeps Docker images/build cache and reuses pnpm/Maven package caches.
 
 .EXAMPLE
+.\scripts\remote-update.ps1 both
+
+Shorthand for .\scripts\remote-update.ps1 -UpdateMode both.
+
+.EXAMPLE
 .\scripts\remote-update.ps1 -UpdateMode both -DeployStrategy clean -PruneDockerCache $true
 
 Run a full clean deployment when the remote host is low on disk or Docker cache is corrupted.
@@ -88,6 +93,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$KnownUpdateModes = @("both", "backend", "frontend")
+$TargetWasNamed = $MyInvocation.Line -match '(?i)(^|\s)-Target(\s|:)'
+if (-not $TargetWasNamed -and -not [string]::IsNullOrWhiteSpace($Target)) {
+    $positionalMode = $Target.Trim().ToLowerInvariant()
+    if ($KnownUpdateModes -contains $positionalMode) {
+        if ($PSBoundParameters.ContainsKey("UpdateMode") -and $UpdateMode -ne $positionalMode) {
+            throw "Conflicting update modes: positional '$positionalMode' and -UpdateMode '$UpdateMode'."
+        }
+        $UpdateMode = $positionalMode
+        $Target = $null
+    }
+}
 
 function Assert-Command {
     param([Parameter(Mandatory = $true)][string]$Name)

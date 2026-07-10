@@ -53,6 +53,12 @@ export interface StoryboardScene {
   intExt: string | null;
   sortOrder: number;
   status: number;
+  composedVideoUrl: string | null;
+  subtitleSrtUrl: string | null;
+  subtitleAssUrl: string | null;
+  composeStatus: EpisodeComposeStatus;
+  composeErrorMsg: string | null;
+  composedAt: string | null;
   createTime: string;
   updateTime: string;
 }
@@ -312,6 +318,9 @@ export const storyboardApi = {
   /** 获取分镜场次详情 */
   getScene: (id: number) =>
     http.get<never, StoryboardScene>(`/api/storyboard/scene/${id}`),
+
+  composeSceneVideo: (sceneId: number, options?: ComposeEpisodeVideoReq) =>
+    http.post<never, string>(`/api/storyboard/scene/${sceneId}/compose-video`, options ?? {}),
 
   /** 创建分镜场次 */
   createScene: (data: StoryboardSceneCreateReq) =>

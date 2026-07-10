@@ -9,12 +9,15 @@ import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.entity.storyboard.StoryboardScene;
 import com.stonewu.fusion.mapper.storyboard.StoryboardEpisodeMapper;
+import com.stonewu.fusion.mapper.storyboard.StoryboardSceneMapper;
 import com.stonewu.fusion.service.storage.MediaStorageService;
 import com.stonewu.fusion.service.storage.StorageConfigService;
 import com.stonewu.fusion.service.task.TaskStreamService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileSystemUtils;
 import org.springframework.util.StringUtils;
@@ -58,8 +61,10 @@ import java.util.concurrent.TimeUnit;
 public class VideoComposeService {
 
     private static final String LOCAL_MEDIA_PUBLIC_PREFIX = "/media/";
-    private static final String TASK_TYPE = "storyboard_episode_compose";
-    private static final String TASK_CONTEXT_TYPE = "storyboard_episode";
+    private static final String EPISODE_TASK_TYPE = "storyboard_episode_compose";
+    private static final String EPISODE_TASK_CONTEXT_TYPE = "storyboard_episode";
+    private static final String SCENE_TASK_TYPE = "storyboard_scene_compose";
+    private static final String SCENE_TASK_CONTEXT_TYPE = "storyboard_scene";
     private static final String TASK_INITIAL_MESSAGE = "已提交合成任务，正在拼接镜头视频…";
 
     public static final int STATUS_IDLE = 0;
@@ -74,9 +79,11 @@ public class VideoComposeService {
 
     private final StoryboardService storyboardService;
     private final StoryboardEpisodeMapper episodeMapper;
+    private final StoryboardSceneMapper sceneMapper;
     private final MediaStorageService mediaStorageService;
     private final StorageConfigService storageConfigService;
     private final TaskStreamService taskStreamService;
+    private final CacheManager cacheManager;
     private final Executor videoComposeExecutor;
 
     @Value("${app.storage.local-base-path:./data/media}")
@@ -96,15 +103,19 @@ public class VideoComposeService {
 
     public VideoComposeService(StoryboardService storyboardService,
                                StoryboardEpisodeMapper episodeMapper,
+                               StoryboardSceneMapper sceneMapper,
                                MediaStorageService mediaStorageService,
                                StorageConfigService storageConfigService,
                                TaskStreamService taskStreamService,
+                               CacheManager cacheManager,
                                @Qualifier("videoComposeExecutor") Executor videoComposeExecutor) {
         this.storyboardService = storyboardService;
         this.episodeMapper = episodeMapper;
+        this.sceneMapper = sceneMapper;
         this.mediaStorageService = mediaStorageService;
         this.storageConfigService = storageConfigService;
         this.taskStreamService = taskStreamService;
+        this.cacheManager = cacheManager;
         this.videoComposeExecutor = videoComposeExecutor;
     }
 
@@ -117,7 +128,6 @@ public class VideoComposeService {
     }
 
     public String submitCompose(Long episodeId, Long userId, ComposeOptions options) {
-        ComposeOptions effectiveOptions = options != null ? options : ComposeOptions.defaults();
         StoryboardEpisode episode = episodeMapper.selectById(episodeId);
         if (episode == null) {
             throw new BusinessException(404, "分镜集不存在: " + episodeId);
@@ -128,64 +138,106 @@ public class VideoComposeService {
             throw new BusinessException(404, "分镜不存在: " + episode.getStoryboardId());
         }
 
+        ComposeTarget target = new ComposeTarget(
+                ComposeTargetType.EPISODE,
+                episodeId,
+                storyboard.getProjectId(),
+                episode.getStoryboardId(),
+                episodeId,
+                EPISODE_TASK_TYPE,
+                EPISODE_TASK_CONTEXT_TYPE,
+                buildEpisodeTaskTitle(episode),
+                "本集没有可合成的视频，请先生成镜头视频",
+                "本集已在合成中，请稍候",
+                "episode",
+                "ep"
+        );
+        return submitTarget(target, userId, collectEpisodeComposeClips(episodeId), options);
+    }
+
+    public String submitSceneCompose(Long sceneId, Long userId) {
+        return submitSceneCompose(sceneId, userId, ComposeOptions.defaults());
+    }
+
+    public String submitSceneCompose(Long sceneId, Long userId, ComposeOptions options) {
+        StoryboardScene scene = sceneMapper.selectById(sceneId);
+        if (scene == null) {
+            throw new BusinessException(404, "分镜场次不存在: " + sceneId);
+        }
+
+        Storyboard storyboard = storyboardService.getById(scene.getStoryboardId());
+        if (storyboard == null) {
+            throw new BusinessException(404, "分镜不存在: " + scene.getStoryboardId());
+        }
+
+        ComposeTarget target = new ComposeTarget(
+                ComposeTargetType.SCENE,
+                sceneId,
+                storyboard.getProjectId(),
+                scene.getStoryboardId(),
+                scene.getEpisodeId(),
+                SCENE_TASK_TYPE,
+                SCENE_TASK_CONTEXT_TYPE,
+                buildSceneTaskTitle(scene),
+                "当前场次没有可合成的视频，请先生成镜头视频",
+                "当前场次已在合成中，请稍候",
+                "scene",
+                "scene"
+        );
+        return submitTarget(target, userId, collectSceneComposeClips(sceneId), options);
+    }
+
+    private String submitTarget(ComposeTarget target, Long userId, List<ComposeClip> clips, ComposeOptions options) {
+        ComposeOptions effectiveOptions = options != null ? options : ComposeOptions.defaults();
         String taskId = taskStreamService.createTask(
                 userId,
-                storyboard.getProjectId(),
-                TASK_TYPE,
-                buildTaskTitle(episode),
-                TASK_CONTEXT_TYPE,
-                episodeId,
+                target.projectId(),
+                target.taskType(),
+                target.taskTitle(),
+                target.taskContextType(),
+                target.id(),
                 TASK_INITIAL_MESSAGE
         );
 
-        List<ComposeClip> clips = collectComposeClips(episodeId);
         if (clips.isEmpty()) {
-            String message = "本集没有可合成的视频，请先生成镜头视频";
-            markFailed(episodeId, message);
+            String message = target.noClipsMessage();
+            markFailed(target, message);
             taskStreamService.fail(taskId, message);
             return taskId;
         }
 
-        int updated = episodeMapper.update(null, new UpdateWrapper<StoryboardEpisode>()
-            .eq("id", episodeId)
-            .ne("compose_status", STATUS_RUNNING)
-            .set("compose_status", STATUS_RUNNING)
-            .set("compose_error_msg", null)
-            .set("composed_video_url", null)
-            .set("subtitle_srt_url", null)
-            .set("subtitle_ass_url", null)
-            .set("composed_at", null));
+        int updated = markRunning(target);
         if (updated == 0) {
-            taskStreamService.fail(taskId, "本集已在合成中，请稍候");
+            taskStreamService.fail(taskId, target.busyMessage());
             return taskId;
         }
 
         try {
             videoComposeExecutor.execute(() -> {
                 try {
-                    doCompose(episodeId, taskId, clips, effectiveOptions);
+                    doCompose(target, taskId, clips, effectiveOptions);
                 } catch (Throwable t) {
                     String errorMessage = resolveErrorMessage(t);
-                    log.error("[VideoCompose] 合成失败: episodeId={}", episodeId, t);
-                    markFailed(episodeId, errorMessage);
+                    log.error("[VideoCompose] 合成失败: {}Id={}", target.logLabel(), target.id(), t);
+                    markFailed(target, errorMessage);
                     taskStreamService.fail(taskId, errorMessage);
                 }
             });
         } catch (RejectedExecutionException e) {
             String message = "合成队列繁忙，请稍后重试";
-            markFailed(episodeId, message);
+            markFailed(target, message);
             taskStreamService.fail(taskId, message);
         }
         return taskId;
     }
 
-    private void doCompose(Long episodeId, String taskId, List<ComposeClip> clips,
+    private void doCompose(ComposeTarget target, String taskId, List<ComposeClip> clips,
                            ComposeOptions options) throws Exception {
-        log.info("[VideoCompose] 开始合成 episodeId={}, taskId={}", episodeId, taskId);
+        log.info("[VideoCompose] 开始合成 {}Id={}, taskId={}", target.logLabel(), target.id(), taskId);
         long startMs = System.currentTimeMillis();
-        log.info("[VideoCompose] episodeId={}, 待合成视频数={}, options={}", episodeId, clips.size(), options);
+        log.info("[VideoCompose] {}Id={}, 待合成视频数={}, options={}", target.logLabel(), target.id(), clips.size(), options);
 
-        Path workDir = Files.createTempDirectory("compose_ep_" + episodeId + "_");
+        Path workDir = Files.createTempDirectory("compose_" + target.workDirPrefix() + "_" + target.id() + "_");
         try {
             List<Path> localFiles = new ArrayList<>();
             for (int i = 0; i < clips.size(); i++) {
@@ -207,7 +259,7 @@ public class VideoComposeService {
             Path output = workDir.resolve("output.mp4");
             boolean ok = runFfmpegConcatDemuxer(listFile, output);
             if (!ok) {
-                log.warn("[VideoCompose] concat demuxer 失败，回退到 filter_complex episodeId={}", episodeId);
+                log.warn("[VideoCompose] concat demuxer 失败，回退到 filter_complex {}Id={}", target.logLabel(), target.id());
                 ok = runFfmpegFilterConcat(localFiles, output);
             }
             if (!ok || !Files.exists(output) || Files.size(output) == 0) {
@@ -244,21 +296,13 @@ public class VideoComposeService {
                 log.info("[VideoCompose] 已保存外挂字幕: srt={}, ass={}", srtUrl, assUrl);
             }
 
-            StoryboardEpisode update = new StoryboardEpisode();
-            update.setId(episodeId);
-            update.setComposedVideoUrl(storedUrl);
-            update.setSubtitleSrtUrl(srtUrl);
-            update.setSubtitleAssUrl(assUrl);
-            update.setComposeStatus(STATUS_DONE);
-            update.setComposedAt(LocalDateTime.now());
-            update.setComposeErrorMsg(null);
-            episodeMapper.updateById(update);
+            markDone(target, storedUrl, srtUrl, assUrl);
 
             String subtitleText = StringUtils.hasText(srtUrl) ? " · 字幕：" + srtUrl : "";
             taskStreamService.complete(taskId, "✓ 合成完成 · 视频地址：" + storedUrl + subtitleText);
 
-            log.info("[VideoCompose] 完成 episodeId={}, 耗时={}ms, 视频数={}",
-                    episodeId, System.currentTimeMillis() - startMs, clips.size());
+            log.info("[VideoCompose] 完成 {}Id={}, 耗时={}ms, 视频数={}",
+                    target.logLabel(), target.id(), System.currentTimeMillis() - startMs, clips.size());
         } finally {
             try {
                 FileSystemUtils.deleteRecursively(workDir.toFile());
@@ -268,13 +312,22 @@ public class VideoComposeService {
         }
     }
 
-    private String buildTaskTitle(StoryboardEpisode episode) {
+    private String buildEpisodeTaskTitle(StoryboardEpisode episode) {
         String episodeLabel = StringUtils.hasText(episode.getTitle())
                 ? episode.getTitle().trim()
                 : (episode.getEpisodeNumber() != null
                 ? "第 " + episode.getEpisodeNumber() + " 集"
                 : "集 " + episode.getId());
-        return "合成本集视频：" + episodeLabel;
+        return "合成本集总视频：" + episodeLabel;
+    }
+
+    private String buildSceneTaskTitle(StoryboardScene scene) {
+        String sceneLabel = StringUtils.hasText(scene.getSceneHeading())
+                ? scene.getSceneHeading().trim()
+                : (StringUtils.hasText(scene.getSceneNumber())
+                ? "场次 " + scene.getSceneNumber()
+                : "场次 " + scene.getId());
+        return "合成场次视频：" + sceneLabel;
     }
 
     private String resolveErrorMessage(Throwable throwable) {
@@ -290,21 +343,28 @@ public class VideoComposeService {
         return "合成失败";
     }
 
-    private List<ComposeClip> collectComposeClips(Long episodeId) {
+    private List<ComposeClip> collectEpisodeComposeClips(Long episodeId) {
         List<StoryboardScene> scenes = new ArrayList<>(storyboardService.listScenesByEpisode(episodeId));
         scenes.sort(Comparator.comparing(s -> Optional.ofNullable(s.getSortOrder()).orElse(0)));
 
         List<ComposeClip> clips = new ArrayList<>();
         for (StoryboardScene scene : scenes) {
-            List<StoryboardItem> items = new ArrayList<>(storyboardService.listItemsByScene(scene.getId()));
-            items.sort(Comparator.comparing(i -> Optional.ofNullable(i.getSortOrder()).orElse(0)));
-            for (StoryboardItem item : items) {
-                String url = StringUtils.hasText(item.getVideoUrl())
-                        ? item.getVideoUrl()
-                        : item.getGeneratedVideoUrl();
-                if (StringUtils.hasText(url)) {
-                    clips.add(new ComposeClip(item, url));
-                }
+            clips.addAll(collectSceneComposeClips(scene.getId()));
+        }
+        return clips;
+    }
+
+    private List<ComposeClip> collectSceneComposeClips(Long sceneId) {
+        List<StoryboardItem> items = new ArrayList<>(storyboardService.listItemsByScene(sceneId));
+        items.sort(Comparator.comparing(i -> Optional.ofNullable(i.getSortOrder()).orElse(0)));
+
+        List<ComposeClip> clips = new ArrayList<>();
+        for (StoryboardItem item : items) {
+            String url = StringUtils.hasText(item.getVideoUrl())
+                    ? item.getVideoUrl()
+                    : item.getGeneratedVideoUrl();
+            if (StringUtils.hasText(url)) {
+                clips.add(new ComposeClip(item, url));
             }
         }
         return clips;
@@ -631,19 +691,108 @@ public class VideoComposeService {
         }
     }
 
-    private void markFailed(Long episodeId, String msg) {
-        try {
-            String trimmed = msg == null ? "未知错误" : (msg.length() > 1000 ? msg.substring(0, 1000) : msg);
-            episodeMapper.update(null, new UpdateWrapper<StoryboardEpisode>()
-                    .eq("id", episodeId)
-                    .set("compose_status", STATUS_FAILED)
-                    .set("compose_error_msg", trimmed)
+    private int markRunning(ComposeTarget target) {
+        int updated = switch (target.type()) {
+            case EPISODE -> episodeMapper.update(null, new UpdateWrapper<StoryboardEpisode>()
+                    .eq("id", target.id())
+                    .ne("compose_status", STATUS_RUNNING)
+                    .set("compose_status", STATUS_RUNNING)
+                    .set("compose_error_msg", null)
                     .set("composed_video_url", null)
                     .set("subtitle_srt_url", null)
                     .set("subtitle_ass_url", null)
                     .set("composed_at", null));
+            case SCENE -> sceneMapper.update(null, new UpdateWrapper<StoryboardScene>()
+                    .eq("id", target.id())
+                    .ne("compose_status", STATUS_RUNNING)
+                    .set("compose_status", STATUS_RUNNING)
+                    .set("compose_error_msg", null)
+                    .set("composed_video_url", null)
+                    .set("subtitle_srt_url", null)
+                    .set("subtitle_ass_url", null)
+                    .set("composed_at", null));
+        };
+        if (updated > 0) {
+            evictTargetCaches(target);
+        }
+        return updated;
+    }
+
+    private void markDone(ComposeTarget target, String videoUrl, String srtUrl, String assUrl) {
+        if (target.type() == ComposeTargetType.EPISODE) {
+            StoryboardEpisode update = new StoryboardEpisode();
+            update.setId(target.id());
+            update.setComposedVideoUrl(videoUrl);
+            update.setSubtitleSrtUrl(srtUrl);
+            update.setSubtitleAssUrl(assUrl);
+            update.setComposeStatus(STATUS_DONE);
+            update.setComposedAt(LocalDateTime.now());
+            update.setComposeErrorMsg(null);
+            episodeMapper.updateById(update);
+        } else {
+            StoryboardScene update = new StoryboardScene();
+            update.setId(target.id());
+            update.setComposedVideoUrl(videoUrl);
+            update.setSubtitleSrtUrl(srtUrl);
+            update.setSubtitleAssUrl(assUrl);
+            update.setComposeStatus(STATUS_DONE);
+            update.setComposedAt(LocalDateTime.now());
+            update.setComposeErrorMsg(null);
+            sceneMapper.updateById(update);
+        }
+        evictTargetCaches(target);
+    }
+
+    private void markFailed(ComposeTarget target, String msg) {
+        try {
+            String trimmed = msg == null ? "未知错误" : (msg.length() > 1000 ? msg.substring(0, 1000) : msg);
+            if (target.type() == ComposeTargetType.EPISODE) {
+                episodeMapper.update(null, new UpdateWrapper<StoryboardEpisode>()
+                        .eq("id", target.id())
+                        .set("compose_status", STATUS_FAILED)
+                        .set("compose_error_msg", trimmed)
+                        .set("composed_video_url", null)
+                        .set("subtitle_srt_url", null)
+                        .set("subtitle_ass_url", null)
+                        .set("composed_at", null));
+            } else {
+                sceneMapper.update(null, new UpdateWrapper<StoryboardScene>()
+                        .eq("id", target.id())
+                        .set("compose_status", STATUS_FAILED)
+                        .set("compose_error_msg", trimmed)
+                        .set("composed_video_url", null)
+                        .set("subtitle_srt_url", null)
+                        .set("subtitle_ass_url", null)
+                        .set("composed_at", null));
+            }
+            evictTargetCaches(target);
         } catch (Exception e) {
             log.error("[VideoCompose] 更新失败状态异常", e);
+        }
+    }
+
+    private void evictTargetCaches(ComposeTarget target) {
+        if (cacheManager == null) {
+            return;
+        }
+        if (target.type() == ComposeTargetType.EPISODE) {
+            evictCache("storyboardEpisode", target.id());
+            evictCache("storyboardEpisode", "storyboard:" + target.storyboardId());
+        } else {
+            evictCache("storyboardScene", target.id());
+            if (target.episodeId() != null) {
+                evictCache("storyboardScene", "episode:" + target.episodeId());
+            }
+            if (target.storyboardId() != null) {
+                evictCache("storyboardScene", "storyboard:" + target.storyboardId());
+            }
+        }
+    }
+
+    private void evictCache(String cacheName, Object key) {
+        Cache cache = cacheManager.getCache(cacheName);
+        if (cache != null) {
+            cache.evict(key);
         }
     }
 
@@ -996,6 +1145,25 @@ public class VideoComposeService {
             }
             return value.trim();
         }
+    }
+
+    private enum ComposeTargetType {
+        EPISODE,
+        SCENE
+    }
+
+    private record ComposeTarget(ComposeTargetType type,
+                                 Long id,
+                                 Long projectId,
+                                 Long storyboardId,
+                                 Long episodeId,
+                                 String taskType,
+                                 String taskContextType,
+                                 String taskTitle,
+                                 String noClipsMessage,
+                                 String busyMessage,
+                                 String logLabel,
+                                 String workDirPrefix) {
     }
 
     private record ComposeClip(StoryboardItem item, String videoUrl) {
