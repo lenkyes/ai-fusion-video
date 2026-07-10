@@ -51,7 +51,7 @@ public class AssetCreateToolExecutor implements ToolExecutor {
                 1. name 不要重复，创建前建议先用 list_project_assets 查看已有资产
                 2. 如需批量创建，请使用 batch_create_assets 工具
                 3. 创建资产后会自动生成一个与资产同名的初始子资产（itemType=initial），无需手动创建
-                4. 创建角色资产（type=character）时还会自动生成一个三视图子资产（itemType=three_view），用于后续生成正/侧/背全身 + 脸部表情特写的角色参考图
+                4. 创建角色资产（type=character）时会为默认 initial 形态自动生成专属三视图；后续新增年龄、换装、受伤等形态时也会各自自动配对专属 three_view
 
                 **角色命名规范**：
                 - 每个角色资产只使用一个名称，以该角色在剧情中最主要/最常出现的名字为准
@@ -94,7 +94,7 @@ public class AssetCreateToolExecutor implements ToolExecutor {
                             "description": "初始子资产内容（可选），用于填充自动创建的初始子资产",
                             "properties": {
                                 "name": { "type": "string", "description": "子资产名称，应使用具体有意义的名称（如角色名、场景名等）" },
-                                "itemType": { "type": "string", "description": "子资产类型。初始子资产请保持 initial；角色三视图由系统自动创建为 three_view" },
+                                "itemType": { "type": "string", "description": "子资产类型。初始子资产请保持 initial；角色每个形态的专属 three_view 均由系统自动创建" },
                                 "imageUrl": { "type": "string", "description": "子资产图片URL" },
                                 "properties": { "type": "object", "additionalProperties": { "type": "string" }, "description": "子资产自定义属性" }
                             }
@@ -159,7 +159,7 @@ public class AssetCreateToolExecutor implements ToolExecutor {
                 }
             }
             if ("character".equals(saved.getType())) {
-                assetService.ensureCharacterThreeViewItem(saved);
+                assetService.ensureCharacterThreeViewItems(saved);
             }
 
             return JSONUtil.createObj()

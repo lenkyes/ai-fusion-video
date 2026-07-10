@@ -73,6 +73,10 @@ public class AssetItemAddToolExecutor implements ToolExecutor {
                             "type": "string",
                             "description": "子资产类型（可选），可用值：initial(初始图)、three_view(角色三视图)、variant(变体)、costume(服装变化)、age(年龄变化)、damaged(损坏状态)、detail(细节)。默认为 initial"
                         },
+                        "parentItemId": {
+                            "type": "number",
+                            "description": "形态根项ID。itemType=three_view 时用于明确归属；角色存在多个形态时必填"
+                        },
                         "name": {
                             "type": "string",
                             "description": "子资产名称（可选），如'正面立绘'、'夜景图'等"
@@ -122,6 +126,7 @@ public class AssetItemAddToolExecutor implements ToolExecutor {
             // 构建子资产对象
             AssetItem item = AssetItem.builder()
                     .assetId(assetId)
+                    .parentItemId(params.getLong("parentItemId"))
                     .imageUrl(imageUrl)
                     .itemType(itemType)
                     .name(StrUtil.isNotBlank(name) ? name : "AI生成图")
@@ -131,6 +136,12 @@ public class AssetItemAddToolExecutor implements ToolExecutor {
                     .build();
 
             AssetItem saved = assetService.createItem(item);
+            Long appearanceItemId = "character".equals(asset.getType())
+                    ? assetService.resolveAppearanceItemId(saved)
+                    : null;
+            Long canonicalThreeViewItemId = "character".equals(asset.getType())
+                    ? assetService.resolveCanonicalThreeViewItemId(saved)
+                    : null;
 
             log.info("[add_asset_item] 图片已保存到资产 - assetId={}, itemId={}, itemType={}, userId={}",
                     assetId, saved.getId(), itemType, userId);
@@ -140,6 +151,10 @@ public class AssetItemAddToolExecutor implements ToolExecutor {
                     .set("assetId", assetId)
                     .set("assetName", asset.getName())
                     .set("itemType", itemType)
+                    .set("parentItemId",
+                            "character".equals(asset.getType()) ? saved.getParentItemId() : null)
+                    .set("appearanceItemId", appearanceItemId)
+                    .set("canonicalThreeViewItemId", canonicalThreeViewItemId)
                     .set("message", String.format("图片已成功保存到资产「%s」中", asset.getName())).toString();
         } catch (Exception e) {
             log.error("[add_asset_item] 保存图片失败", e);

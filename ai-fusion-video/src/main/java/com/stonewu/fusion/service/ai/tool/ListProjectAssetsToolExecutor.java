@@ -14,7 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 项目资产列表工具（list_project_assets）
@@ -46,7 +48,7 @@ public class ListProjectAssetsToolExecutor implements ToolExecutor {
                 使用场景：
                 - 创建资产前先查看已有资产，避免重复创建
                 - 查看角色/场景/道具的详细信息和图片
-                - 角色资产会返回 itemType=initial 和 itemType=three_view 两类基础子资产；旧角色若缺失 three_view，会在返回前自动补齐
+                - 角色每个形态根项都会返回其专属 three_view，并通过 parentItemId、appearanceItemId、canonicalThreeViewItemId 明确配对；旧数据缺失时会逐形态补齐
 
                 如果提供了 projectId，则返回该项目下的资产（需有权限）。
                 如果没有 projectId，则返回当前用户可访问的资产。
@@ -96,17 +98,36 @@ public class ListProjectAssetsToolExecutor implements ToolExecutor {
             JSONArray resultArray = new JSONArray();
             for (Asset asset : assets) {
                 if ("character".equals(asset.getType())) {
-                    assetService.ensureCharacterThreeViewItem(asset);
+                    assetService.ensureCharacterThreeViewItems(asset);
                 }
                 List<AssetItem> items = assetService.listItems(asset.getId());
                 JSONArray itemsArray = new JSONArray();
+                boolean characterAsset = "character".equals(asset.getType());
+                Map<Long, AssetItem> threeViewByAppearanceItemId = new HashMap<>();
+                if (characterAsset) {
+                    for (AssetItem item : items) {
+                        if ("three_view".equals(item.getItemType()) && item.getParentItemId() != null) {
+                            threeViewByAppearanceItemId.putIfAbsent(item.getParentItemId(), item);
+                        }
+                    }
+                }
                 for (AssetItem item : items) {
+                    Long appearanceItemId = characterAsset ? assetService.resolveAppearanceItemId(item) : null;
+                    AssetItem canonicalThreeView = appearanceItemId != null
+                            ? threeViewByAppearanceItemId.get(appearanceItemId)
+                            : null;
                     itemsArray.add(JSONUtil.createObj()
                             .set("id", item.getId())
                             .set("itemType", item.getItemType())
                             .set("name", item.getName())
+                            .set("parentItemId", characterAsset ? item.getParentItemId() : null)
+                            .set("appearanceItemId", appearanceItemId)
+                            .set("canonicalThreeViewItemId",
+                                    canonicalThreeView != null ? canonicalThreeView.getId() : null)
                             .set("imageUrl", item.getImageUrl())
-                            .set("thumbnailUrl", item.getThumbnailUrl()));
+                            .set("thumbnailUrl", item.getThumbnailUrl())
+                            .set("properties", item.getProperties())
+                            .set("aiPrompt", item.getAiPrompt()));
                 }
 
                 resultArray.add(JSONUtil.createObj()

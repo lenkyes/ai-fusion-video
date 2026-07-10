@@ -31,6 +31,12 @@ public class AssetItem extends BaseEntity {
     /** 所属主资产ID */
     private Long assetId;
 
+    /**
+     * 所属形态根项ID。仅 three_view 使用，指向同一主资产下的
+     * initial / variant / age / costume / damaged 子资产。
+     */
+    private Long parentItemId;
+
     /** 子资产类型：initial-初始图 / three_view-角色三视图 / variant-变体 / costume-服装变化 / age-年龄变化 / damaged-损坏状态等 */
     private String itemType;
 

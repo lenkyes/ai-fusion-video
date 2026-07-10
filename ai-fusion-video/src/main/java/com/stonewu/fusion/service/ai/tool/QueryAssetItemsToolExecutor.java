@@ -15,7 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 查询子资产列表工具执行器
@@ -54,7 +56,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
 
                 **复用判断原则**：
                 - 每个主资产创建时会自动生成一个初始子资产（默认变体），图片挂在子资产上
-                - 角色资产还会自动拥有 itemType=three_view 的三视图子资产；查询旧角色资产时若缺失会自动补齐，供后续生图生成正面/侧面/背面全身 + 脸部表情特写的角色参考表
+                - 角色的每个形态根项（initial/variant/age/costume/damaged）都会自动拥有一个 parentItemId 指向该根项的专属 three_view；旧数据缺失时会逐形态补齐
                 - 子资产代表外观上有显著变化的变体（如受伤、换装、年龄变化、场景损毁等）
                 - 如果剧本描述的只是表情变化（微笑、愤怒）、心理状态（紧张、兴奋）、
                   简单动作（奔跑、坐下），则直接复用初始子资产即可，无需查找或创建新子资产
@@ -66,7 +68,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                 2. 按 assetId 精确查询单个
                 3. 按 assetName + projectId 模糊匹配主资产名称
 
-                返回每个资产的基础信息、properties、aiPrompt，以及子资产列表（id、name、itemType、imageUrl、thumbnailUrl、properties、aiPrompt）。
+                返回每个资产的基础信息、properties、aiPrompt，以及子资产列表；角色项还包含 parentItemId、appearanceItemId、canonicalThreeViewItemId，必须按这些字段匹配专属三视图。
                 """;
     }
 
@@ -160,7 +162,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
                 }
 
                 if ("character".equals(asset.getType())) {
-                    assetService.ensureCharacterThreeViewItem(asset);
+                    assetService.ensureCharacterThreeViewItems(asset);
                 }
                 List<AssetItem> items = assetService.listItems(asset.getId());
                 results.add(buildAssetResult(asset, items));
@@ -215,7 +217,7 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
         }
 
         if ("character".equals(asset.getType())) {
-            assetService.ensureCharacterThreeViewItem(asset);
+            assetService.ensureCharacterThreeViewItems(asset);
         }
         List<AssetItem> items = assetService.listItems(asset.getId());
         return buildAssetResult(asset, items).toString();
@@ -226,11 +228,28 @@ public class QueryAssetItemsToolExecutor implements ToolExecutor {
      */
     private JSONObject buildAssetResult(Asset asset, List<AssetItem> items) {
         JSONArray itemsArray = new JSONArray();
+        boolean characterAsset = "character".equals(asset.getType());
+        Map<Long, AssetItem> threeViewByAppearanceItemId = new HashMap<>();
+        if (characterAsset) {
+            for (AssetItem item : items) {
+                if ("three_view".equals(item.getItemType()) && item.getParentItemId() != null) {
+                    threeViewByAppearanceItemId.putIfAbsent(item.getParentItemId(), item);
+                }
+            }
+        }
         for (AssetItem item : items) {
+            Long appearanceItemId = characterAsset ? assetService.resolveAppearanceItemId(item) : null;
+            AssetItem canonicalThreeView = appearanceItemId != null
+                    ? threeViewByAppearanceItemId.get(appearanceItemId)
+                    : null;
             itemsArray.add(JSONUtil.createObj()
                     .set("id", item.getId())
                     .set("name", item.getName())
                     .set("itemType", item.getItemType())
+                    .set("parentItemId", characterAsset ? item.getParentItemId() : null)
+                    .set("appearanceItemId", appearanceItemId)
+                    .set("canonicalThreeViewItemId",
+                            canonicalThreeView != null ? canonicalThreeView.getId() : null)
                     .set("imageUrl", item.getImageUrl())
                     .set("thumbnailUrl", item.getThumbnailUrl())
                     .set("properties", item.getProperties())

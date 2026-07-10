@@ -69,6 +69,8 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
                 **资产引用解析**：每个镜头的 characterIds、propIds、sceneAssetItemId 会自动解析为带图片URL的资产引用信息，
                 返回在 characterRefs、propRefs、sceneRef 字段中，包含子资产ID、名称、类型、图片URL、主资产描述、资产属性和生成提示词，
                 可直接用于构建角色/场景/道具一致性锁定上下文，无需额外调用 query_asset_items。
+                角色引用会保留 selectedAssetItemId，并由后端按 parentItemId 确定 appearanceItemId 与 canonicalThreeViewItemId；
+                专属三视图有图时 assetItemId/imageUrl 指向该三视图，否则只回退同一形态根项，绝不跨形态选图。
                 """;
     }
 
@@ -467,20 +469,43 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
     /**
      * 构建单个子资产的引用信息
      */
-    private JSONObject buildSingleAssetRef(AssetItem assetItem, Asset asset) {
+    private JSONObject buildSingleAssetRef(AssetItem selectedItem, Asset asset) {
+        boolean characterAsset = asset != null && "character".equals(asset.getType());
+        AssetItem appearanceItem = characterAsset
+                ? assetService.resolveAppearanceItem(selectedItem)
+                : null;
+        AssetItem canonicalThreeView = appearanceItem != null
+                ? assetService.findCanonicalThreeViewItem(appearanceItem.getId())
+                : null;
+        AssetItem referenceItem = characterAsset
+                ? assetService.resolveCanonicalReferenceItem(selectedItem)
+                : selectedItem;
+        if (referenceItem == null) {
+            referenceItem = selectedItem;
+        }
+        AssetItem descriptiveItem = appearanceItem != null ? appearanceItem : selectedItem;
+
         return JSONUtil.createObj()
-                .set("assetItemId", assetItem.getId())
-                .set("assetId", assetItem.getAssetId())
+                .set("selectedAssetItemId", selectedItem.getId())
+                .set("assetItemId", referenceItem.getId())
+                .set("assetId", selectedItem.getAssetId())
                 .set("assetName", asset != null ? asset.getName() : null)
                 .set("assetType", asset != null ? asset.getType() : null)
                 .set("assetDescription", asset != null ? asset.getDescription() : null)
                 .set("assetProperties", asset != null ? asset.getProperties() : null)
                 .set("assetPrompt", asset != null ? asset.getAiPrompt() : null)
-                .set("name", assetItem.getName())
-                .set("itemType", assetItem.getItemType())
-                .set("imageUrl", assetItem.getImageUrl())
-                .set("thumbnailUrl", assetItem.getThumbnailUrl())
-                .set("itemProperties", assetItem.getProperties())
-                .set("itemPrompt", assetItem.getAiPrompt());
+                .set("name", descriptiveItem.getName())
+                .set("itemType", referenceItem.getItemType())
+                .set("selectedItemType", selectedItem.getItemType())
+                .set("parentItemId", characterAsset ? referenceItem.getParentItemId() : null)
+                .set("appearanceItemId", appearanceItem != null ? appearanceItem.getId() : null)
+                .set("canonicalThreeViewItemId",
+                        canonicalThreeView != null ? canonicalThreeView.getId() : null)
+                .set("imageUrl", referenceItem.getImageUrl())
+                .set("thumbnailUrl", referenceItem.getThumbnailUrl())
+                .set("itemProperties", descriptiveItem.getProperties())
+                .set("itemPrompt", descriptiveItem.getAiPrompt())
+                .set("referenceItemProperties", referenceItem.getProperties())
+                .set("referenceItemPrompt", referenceItem.getAiPrompt());
     }
 }

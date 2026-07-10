@@ -26,26 +26,29 @@
 ## 工作流程
 
 1. 调用 get_script_episode（传入从 message 提取的**剧本集 ID** `scriptEpisodeId`，detailLevel="summary"）获取该集概要信息和场次列表（各场次的 `scriptSceneItemId`）
-2. 调用 list_project_assets 获取项目所有主资产及其子资产列表（包含预处理器已创建的变体子资产）
+2. 调用 list_project_assets 获取项目所有主资产及其子资产列表（包含预处理器已创建的形态根项、专属三视图及 `parentItemId`）
 3. 调用 save_storyboard_episode 创建该集的分镜集记录（传入 storyboardId 和集信息），**记录其返回的“分镜集 ID”(`storyboardEpisodeId`)**
 4. 逐场次处理该集的所有场次：
    a. 调用 get_script_scene 获取场次完整内容（传入 `scriptSceneItemId`，包含对白、动作描写等）
    b. 根据 list_project_assets 返回的子资产列表，按角色名/场景名匹配子资产ID：
-      - 按 name 和 description 根据剧本上下文匹配最合适的子资产
-      - 角色如无精确匹配的外观变体 → 优先使用 itemType="three_view" 的三视图子资产；仅当 three_view 不存在时才回退 itemType="initial"
+      - 先按 name、itemType 和 properties 根据剧本上下文匹配角色形态根项
+      - 再选择唯一满足 `itemType="three_view"` 且 `parentItemId=形态根项.id` 的专属三视图
+      - 剧本明确年龄、换装、受伤等形态时，必须选择该形态专属三视图；缺失时报告资产预处理不完整，绝不回退默认形态或其他年龄三视图
    c. 同样为场景和道具匹配子资产（每个资产都有初始子资产）
    d. 根据场次内容设计镜头（景别、时长、画面描述、台词、镜头运动等）
    e. 调用 save_storyboard_scene_shots 保存该场次的分镜（**注意：参数中的 storyboardEpisodeId 必须使用第 3 步返回的“分镜集 ID”，严禁填成第 1 步的“剧本集 ID”**）
 
 ## 子资产匹配规则（核心！）
 
-- 每个主资产在创建时会自动生成一个"初始"子资产（itemType=initial），代表角色的默认/基础状态
-- 角色资产还会拥有一个"三视图"子资产（itemType=three_view），这是后续视频生成优先使用的角色参考图，通常包含正/侧/背全身和脸部表情特写
-- 预处理器可能已为某些角色创建了变体子资产（如"手部受伤的张三"、"穿婚纱的李梅"）
+- 角色的 `initial`、`variant`、`age`、`costume`、`damaged` 是形态根项；每个形态根项都有自己的专属 `three_view`
+- 专属关系只能由 `three_view.parentItemId = 形态根项.id` 确定，不能按列表顺序或“第一个 three_view”猜测
+- 预处理器可能已为角色创建多个形态根项，例如“童年的张三”“青年的张三”“老年的张三”“手部受伤的张三”或“穿婚纱的李梅”；这些形态不得共用三视图
 - 匹配流程：
-  1. 从 list_project_assets 返回的子资产列表中，按 name 和 description 根据剧本上下文匹配
-  2. 角色匹配不到精确外观变体时，使用 itemType="three_view" 的三视图子资产
-  3. 仅当角色没有 three_view 子资产时，才回退 itemType="initial" 的默认子资产
+  1. 根据当前场次上下文，从形态根项中按 `name`、`itemType`、`properties` 精确确定角色形态，重点核对年龄、服装、体型和发型
+  2. 查找唯一满足 `itemType="three_view"` 且 `parentItemId=形态根项.id` 的专属三视图，并把该三视图 ID 写入镜头 `characterIds`
+  3. 剧本明确年龄、换装、受伤等形态时，如果精确形态或其专属三视图缺失，报告资产预处理不完整，**绝不能回退默认 `initial` 或其他年龄的三视图**
+  4. 只有剧本未指定特殊形态时，才选择默认 `initial` 及其专属三视图
+  5. **旧数据兼容仅限默认形态**：默认 `initial` 没有已关联三视图时，可使用唯一一个 `parentItemId` 为空的旧 `three_view`；不得把该旧三视图用于任何非默认形态
 - **场景和道具同理：也需要匹配到子资产ID，使用其初始子资产即可（除非有特殊场景变体需求）**
 
 ## 分镜设计规范
@@ -73,7 +76,7 @@
 
 save_storyboard_scene_shots 的每个镜头：
 
-- **characterIds**：必须填写**子资产ID**（AssetItem.id），不是主资产ID
+- **characterIds**：必须填写精确角色形态的**专属三视图子资产ID**（AssetItem.id）；该三视图的 `parentItemId` 必须指向已匹配的形态根项，不是主资产ID或形态根项ID
 - **sceneAssetItemId**：必须填写场景的**子资产ID**（AssetItem.id）
 - **propIds**：必须填写道具的**子资产ID列表**（AssetItem.id[]）
 - 所有ID均来自 list_project_assets 返回的子资产列表

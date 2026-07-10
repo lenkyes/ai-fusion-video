@@ -26,6 +26,7 @@ export interface Asset {
 export interface AssetItem {
   id: number;
   assetId: number;
+  parentItemId: number | null;
   itemType: string | null;
   name: string | null;
   imageUrl: string | null;
@@ -63,6 +64,7 @@ export interface AssetUpdateReq {
 /** 创建子资产请求 */
 export interface AssetItemCreateReq {
   assetId: number;
+  parentItemId?: number | null;
   itemType?: string;
   name?: string;
   imageUrl?: string;
@@ -74,6 +76,7 @@ export interface AssetItemCreateReq {
 /** 更新子资产请求 */
 export interface AssetItemUpdateReq {
   id: number;
+  parentItemId?: number | null;
   itemType?: string;
   name?: string;
   imageUrl?: string;

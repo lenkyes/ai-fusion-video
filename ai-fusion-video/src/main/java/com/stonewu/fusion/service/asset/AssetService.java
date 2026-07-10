@@ -19,8 +19,11 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -34,6 +37,8 @@ public class AssetService {
     private static final String ASSET_TYPE_CHARACTER = "character";
     private static final String ITEM_TYPE_INITIAL = "initial";
     private static final String ITEM_TYPE_THREE_VIEW = "three_view";
+    private static final Set<String> CHARACTER_APPEARANCE_ITEM_TYPES = Set.of(
+            ITEM_TYPE_INITIAL, "variant", "age", "costume", "damaged");
 
     private final AssetMapper assetMapper;
     private final AssetItemMapper assetItemMapper;
@@ -221,7 +226,8 @@ public class AssetService {
         AssetItem initialItem = buildInitialItem(asset);
         assetItemMapper.insert(initialItem);
         if (isCharacterAsset(asset)) {
-            assetItemMapper.insert(buildCharacterThreeViewItem(asset, 1, asset.getProperties()));
+            assetItemMapper.insert(buildCharacterThreeViewItem(
+                    asset, initialItem, 1, resolveAppearanceProperties(asset, initialItem)));
         }
 
         return asset;
@@ -230,26 +236,89 @@ public class AssetService {
     @CacheEvict(value = { "assetItem", "asset" }, allEntries = true)
     @Transactional
     public AssetItem ensureCharacterThreeViewItem(Asset asset) {
-        if (!isCharacterAsset(asset) || asset.getId() == null) {
+        List<AssetItem> threeViewItems = ensureCharacterThreeViewItems(asset);
+        if (threeViewItems.isEmpty()) {
             return null;
         }
-
-        List<AssetItem> items = listItems(asset.getId());
-        AssetItem existingThreeView = items.stream()
-                .filter(item -> ITEM_TYPE_THREE_VIEW.equals(item.getItemType()))
+        List<AssetItem> items = new ArrayList<>(listItems(asset.getId()));
+        Long initialItemId = items.stream()
+                .filter(item -> ITEM_TYPE_INITIAL.equals(item.getItemType()))
+                .map(AssetItem::getId)
                 .findFirst()
                 .orElse(null);
-        if (existingThreeView != null) {
-            String properties = resolveThreeViewProperties(asset, items);
-            if (StrUtil.isBlank(existingThreeView.getProperties()) && StrUtil.isNotBlank(properties)) {
-                existingThreeView.setProperties(properties);
-                assetItemMapper.updateById(existingThreeView);
-            }
-            return existingThreeView;
+        return threeViewItems.stream()
+                .filter(item -> Objects.equals(initialItemId, item.getParentItemId()))
+                .findFirst()
+                .orElse(threeViewItems.get(0));
+    }
+
+    /**
+     * 为角色下每个形态根项补齐专属三视图。
+     */
+    @CacheEvict(value = { "assetItem", "asset" }, allEntries = true)
+    @Transactional
+    public List<AssetItem> ensureCharacterThreeViewItems(Asset asset) {
+        if (!isCharacterAsset(asset) || asset.getId() == null) {
+            return List.of();
         }
 
-        String properties = resolveThreeViewProperties(asset, items);
-        AssetItem threeViewItem = buildCharacterThreeViewItem(asset, nextSortOrder(items), properties);
+        List<AssetItem> items = new ArrayList<>(listItems(asset.getId()));
+        List<AssetItem> appearanceItems = items.stream()
+                .filter(this::isCharacterAppearanceItem)
+                .toList();
+        List<AssetItem> unboundThreeViews = new ArrayList<>(items.stream()
+                .filter(this::isThreeViewItem)
+                .filter(item -> item.getParentItemId() == null)
+                .toList());
+        List<AssetItem> result = new ArrayList<>();
+
+        for (AssetItem appearanceItem : appearanceItems) {
+            List<AssetItem> linked = items.stream()
+                    .filter(this::isThreeViewItem)
+                    .filter(item -> Objects.equals(appearanceItem.getId(), item.getParentItemId()))
+                    .toList();
+            if (linked.size() > 1) {
+                throw new BusinessException("角色形态存在多个专属三视图: " + appearanceItem.getId());
+            }
+            if (!linked.isEmpty()) {
+                result.add(linked.get(0));
+                continue;
+            }
+
+            // 兼容迁移前的单个全局三视图，只能确定性地归到 initial。
+            if (ITEM_TYPE_INITIAL.equals(appearanceItem.getItemType()) && unboundThreeViews.size() == 1) {
+                AssetItem legacyThreeView = unboundThreeViews.remove(0);
+                legacyThreeView.setParentItemId(appearanceItem.getId());
+                assetItemMapper.updateById(legacyThreeView);
+                result.add(legacyThreeView);
+                continue;
+            }
+
+            AssetItem threeViewItem = buildCharacterThreeViewItem(
+                    asset, appearanceItem, nextSortOrder(items), resolveAppearanceProperties(asset, appearanceItem));
+            assetItemMapper.insert(threeViewItem);
+            items.add(threeViewItem);
+            result.add(threeViewItem);
+        }
+
+        return result;
+    }
+
+    @CacheEvict(value = { "assetItem", "asset" }, allEntries = true)
+    @Transactional
+    public AssetItem ensureCharacterThreeViewItem(Asset asset, AssetItem appearanceItem) {
+        if (!isCharacterAsset(asset) || appearanceItem == null
+                || !Objects.equals(asset.getId(), appearanceItem.getAssetId())
+                || !isCharacterAppearanceItem(appearanceItem)) {
+            return null;
+        }
+        AssetItem existing = findCanonicalThreeViewItem(appearanceItem.getId());
+        if (existing != null) {
+            return existing;
+        }
+        List<AssetItem> items = listItems(asset.getId());
+        AssetItem threeViewItem = buildCharacterThreeViewItem(
+                asset, appearanceItem, nextSortOrder(items), resolveAppearanceProperties(asset, appearanceItem));
         assetItemMapper.insert(threeViewItem);
         return threeViewItem;
     }
@@ -289,7 +358,14 @@ public class AssetService {
     @Transactional
     public AssetItem createItem(AssetItem item) {
         validateAssetItemMediaUrls(item);
+        if (StrUtil.isBlank(item.getItemType())) {
+            item.setItemType("variant");
+        }
+        Asset asset = validateAndResolveItemRelationship(item, null);
         assetItemMapper.insert(item);
+        if (isCharacterAsset(asset) && isCharacterAppearanceItem(item)) {
+            ensureCharacterThreeViewItem(asset, item);
+        }
         syncCoverIfAbsent(item);
         return item;
     }
@@ -300,26 +376,136 @@ public class AssetService {
         AssetItem existing = assetItemMapper.selectById(item.getId());
         if (existing == null)
             throw new BusinessException("子资产不存在: " + item.getId());
-        validateAssetItemMediaUrls(item);
-        assetItemMapper.updateById(item);
-        // 部分更新时 item 可能缺少 assetId/imageUrl/itemType，用 existing 补全
-        if (item.getAssetId() == null) {
-            item.setAssetId(existing.getAssetId());
+        if (item.getItemType() != null && !Objects.equals(item.getItemType(), existing.getItemType())
+                && (ITEM_TYPE_THREE_VIEW.equals(item.getItemType())
+                        || ITEM_TYPE_THREE_VIEW.equals(existing.getItemType()))) {
+            throw new BusinessException("不支持在 three_view 与形态根项之间直接切换类型");
         }
+        if (item.getItemType() != null && !Objects.equals(item.getItemType(), existing.getItemType())
+                && isCharacterAppearanceItemType(item.getItemType())
+                        != isCharacterAppearanceItemType(existing.getItemType())) {
+            throw new BusinessException("不支持在角色形态根项与普通子项之间直接切换类型");
+        }
+        validateAssetItemMediaUrls(item);
+        item.setAssetId(existing.getAssetId());
+        if (item.getItemType() == null) {
+            item.setItemType(existing.getItemType());
+        }
+        if (item.getParentItemId() == null) {
+            item.setParentItemId(existing.getParentItemId());
+        }
+        Asset asset = validateAndResolveItemRelationship(item, existing.getId());
+        assetItemMapper.updateById(item);
+        // 部分更新时用 existing 补全返回值和后续同步所需字段。
         if (item.getImageUrl() == null) {
             item.setImageUrl(existing.getImageUrl());
         }
-        if (item.getItemType() == null) {
-            item.setItemType(existing.getItemType());
+        if (item.getThumbnailUrl() == null) {
+            item.setThumbnailUrl(existing.getThumbnailUrl());
+        }
+        if (item.getName() == null) {
+            item.setName(existing.getName());
+        }
+        if (item.getProperties() == null) {
+            item.setProperties(existing.getProperties());
+        }
+        if (item.getSortOrder() == null) {
+            item.setSortOrder(existing.getSortOrder());
+        }
+        if (item.getSourceType() == null) {
+            item.setSourceType(existing.getSourceType());
+        }
+        if (item.getAiPrompt() == null) {
+            item.setAiPrompt(existing.getAiPrompt());
+        }
+        if (isCharacterAsset(asset) && isCharacterAppearanceItem(item)) {
+            AssetItem threeViewItem = ensureCharacterThreeViewItem(asset, item);
+            syncThreeViewMetadata(asset, item, threeViewItem);
         }
         syncCoverIfAbsent(item);
         return item;
     }
 
-    @CacheEvict(value = "assetItem", allEntries = true)
+    @CacheEvict(value = { "assetItem", "asset" }, allEntries = true)
     @Transactional
     public void deleteItem(Long id) {
+        AssetItem item = getItemById(id);
+        if (isCharacterAppearanceItem(item)) {
+            List<AssetItem> linkedThreeViews = assetItemMapper.selectList(new LambdaQueryWrapper<AssetItem>()
+                    .eq(AssetItem::getAssetId, item.getAssetId())
+                    .eq(AssetItem::getParentItemId, item.getId())
+                    .eq(AssetItem::getItemType, ITEM_TYPE_THREE_VIEW));
+            linkedThreeViews.forEach(linked -> assetItemMapper.deleteById(linked.getId()));
+        }
         assetItemMapper.deleteById(id);
+    }
+
+    public boolean isCharacterAppearanceItem(AssetItem item) {
+        return item != null && isCharacterAppearanceItemType(item.getItemType());
+    }
+
+    public Long resolveAppearanceItemId(AssetItem item) {
+        if (item == null) {
+            return null;
+        }
+        if (isThreeViewItem(item)) {
+            return item.getParentItemId();
+        }
+        return isCharacterAppearanceItem(item) ? item.getId() : null;
+    }
+
+    public AssetItem resolveAppearanceItem(AssetItem item) {
+        Long appearanceItemId = resolveAppearanceItemId(item);
+        if (appearanceItemId == null) {
+            return null;
+        }
+        if (Objects.equals(appearanceItemId, item.getId())) {
+            return item;
+        }
+        AssetItem appearanceItem = assetItemMapper.selectById(appearanceItemId);
+        if (appearanceItem == null
+                || !Objects.equals(item.getAssetId(), appearanceItem.getAssetId())
+                || !isCharacterAppearanceItem(appearanceItem)) {
+            return null;
+        }
+        return appearanceItem;
+    }
+
+    public AssetItem findCanonicalThreeViewItem(Long appearanceItemId) {
+        if (appearanceItemId == null) {
+            return null;
+        }
+        return assetItemMapper.selectList(new LambdaQueryWrapper<AssetItem>()
+                        .eq(AssetItem::getParentItemId, appearanceItemId)
+                        .eq(AssetItem::getItemType, ITEM_TYPE_THREE_VIEW)
+                        .orderByAsc(AssetItem::getSortOrder)
+                        .orderByAsc(AssetItem::getId))
+                .stream()
+                .findFirst()
+                .orElse(null);
+    }
+
+    public Long resolveCanonicalThreeViewItemId(AssetItem item) {
+        AssetItem canonicalThreeView = findCanonicalThreeViewItem(resolveAppearanceItemId(item));
+        return canonicalThreeView != null ? canonicalThreeView.getId() : null;
+    }
+
+    /**
+     * 角色形态优先使用其专属且已有图片的三视图；否则仅回退到该形态根项。
+     */
+    public AssetItem resolveCanonicalReferenceItem(AssetItem selectedItem) {
+        if (selectedItem == null) {
+            return null;
+        }
+        AssetItem appearanceItem = resolveAppearanceItem(selectedItem);
+        if (appearanceItem == null) {
+            return selectedItem;
+        }
+        AssetItem canonicalThreeView = findCanonicalThreeViewItem(appearanceItem.getId());
+        if (canonicalThreeView != null && StrUtil.isNotBlank(canonicalThreeView.getImageUrl())) {
+            return canonicalThreeView;
+        }
+        return appearanceItem;
     }
 
     private void validateAssetMediaUrls(Asset asset) {
@@ -364,13 +550,17 @@ public class AssetService {
                 .build();
     }
 
-    private AssetItem buildCharacterThreeViewItem(Asset asset, int sortOrder, String properties) {
+    private AssetItem buildCharacterThreeViewItem(
+            Asset asset, AssetItem appearanceItem, int sortOrder, String properties) {
         return AssetItem.builder()
                 .assetId(asset.getId())
+                .parentItemId(appearanceItem.getId())
                 .itemType(ITEM_TYPE_THREE_VIEW)
-                .name(threeViewItemName(asset.getName()))
+                .name(threeViewItemName(StrUtil.blankToDefault(appearanceItem.getName(), asset.getName())))
                 .sortOrder(sortOrder)
-                .sourceType(assetSourceType(asset))
+                .sourceType(appearanceItem.getSourceType() != null
+                        ? appearanceItem.getSourceType()
+                        : assetSourceType(asset))
                 .properties(properties)
                 .build();
     }
@@ -384,16 +574,14 @@ public class AssetService {
     }
 
     private String threeViewItemName(String assetName) {
-        return StrUtil.blankToDefault(assetName, "角色") + " 三视图";
+        String name = StrUtil.blankToDefault(assetName, "角色") + " 三视图";
+        return name.length() <= 128 ? name : name.substring(0, 128);
     }
 
-    private String resolveThreeViewProperties(Asset asset, List<AssetItem> items) {
-        return items.stream()
-                .filter(item -> ITEM_TYPE_INITIAL.equals(item.getItemType()))
-                .map(AssetItem::getProperties)
-                .filter(StrUtil::isNotBlank)
-                .findFirst()
-                .orElse(asset.getProperties());
+    private String resolveAppearanceProperties(Asset asset, AssetItem appearanceItem) {
+        return StrUtil.isNotBlank(appearanceItem.getProperties())
+                ? appearanceItem.getProperties()
+                : asset.getProperties();
     }
 
     private int nextSortOrder(List<AssetItem> items) {
@@ -403,6 +591,68 @@ public class AssetService {
                 .mapToInt(Integer::intValue)
                 .max()
                 .orElse(0) + 1;
+    }
+
+    private boolean isThreeViewItem(AssetItem item) {
+        return item != null && ITEM_TYPE_THREE_VIEW.equals(item.getItemType());
+    }
+
+    private boolean isCharacterAppearanceItemType(String itemType) {
+        return CHARACTER_APPEARANCE_ITEM_TYPES.contains(itemType);
+    }
+
+    private Asset validateAndResolveItemRelationship(AssetItem item, Long existingItemId) {
+        if (item == null || item.getAssetId() == null) {
+            throw new BusinessException("资产ID不能为空");
+        }
+        Asset asset = getById(item.getAssetId());
+        if (isThreeViewItem(item)) {
+            if (!isCharacterAsset(asset)) {
+                throw new BusinessException("three_view 仅支持角色资产");
+            }
+            if (item.getParentItemId() == null) {
+                List<AssetItem> appearanceItems = listItems(item.getAssetId()).stream()
+                        .filter(this::isCharacterAppearanceItem)
+                        .toList();
+                if (appearanceItems.size() != 1) {
+                    throw new BusinessException("角色存在多个形态，创建或修复 three_view 时必须指定 parentItemId");
+                }
+                item.setParentItemId(appearanceItems.get(0).getId());
+            }
+            AssetItem appearanceItem = assetItemMapper.selectById(item.getParentItemId());
+            if (appearanceItem == null
+                    || !Objects.equals(item.getAssetId(), appearanceItem.getAssetId())
+                    || !isCharacterAppearanceItem(appearanceItem)) {
+                throw new BusinessException("parentItemId 必须指向同一角色资产下的形态根项");
+            }
+            boolean duplicate = assetItemMapper.selectList(new LambdaQueryWrapper<AssetItem>()
+                            .eq(AssetItem::getAssetId, item.getAssetId())
+                            .eq(AssetItem::getParentItemId, item.getParentItemId())
+                            .eq(AssetItem::getItemType, ITEM_TYPE_THREE_VIEW))
+                    .stream()
+                    .anyMatch(existing -> !Objects.equals(existingItemId, existing.getId()));
+            if (duplicate) {
+                throw new BusinessException("该角色形态已存在专属三视图: " + item.getParentItemId());
+            }
+        } else if (item.getParentItemId() != null) {
+            throw new BusinessException("只有 three_view 可以设置 parentItemId");
+        }
+        return asset;
+    }
+
+    private void syncThreeViewMetadata(Asset asset, AssetItem appearanceItem, AssetItem threeViewItem) {
+        if (threeViewItem == null || StrUtil.isNotBlank(threeViewItem.getImageUrl())) {
+            return;
+        }
+        String expectedName = threeViewItemName(StrUtil.blankToDefault(appearanceItem.getName(), asset.getName()));
+        String expectedProperties = resolveAppearanceProperties(asset, appearanceItem);
+        if (Objects.equals(expectedName, threeViewItem.getName())
+                && Objects.equals(expectedProperties, threeViewItem.getProperties())) {
+            return;
+        }
+        threeViewItem.setName(expectedName);
+        threeViewItem.setProperties(expectedProperties);
+        assetItemMapper.updateById(threeViewItem);
     }
 
     /**

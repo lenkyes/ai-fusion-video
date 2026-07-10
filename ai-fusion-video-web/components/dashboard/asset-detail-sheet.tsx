@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   Select,
@@ -84,21 +84,140 @@ function isSameMediaUrl(a?: string | null, b?: string | null) {
   return rawA === rawB || normalizeMediaUrl(rawA) === normalizeMediaUrl(rawB);
 }
 
-const CHARACTER_BASE_ITEM_TYPES = new Set(["initial", "three_view"]);
+const CHARACTER_APPEARANCE_ITEM_TYPES = new Set([
+  "initial",
+  "variant",
+  "age",
+  "costume",
+  "damaged",
+]);
+
+function isCharacterAppearanceItem(item: AssetItem) {
+  return CHARACTER_APPEARANCE_ITEM_TYPES.has(item.itemType || "");
+}
+
+function resolveLegacyCharacterPair(items: AssetItem[]) {
+  const initialItems = items.filter(
+    (entry) => entry.itemType === "initial" && entry.parentItemId == null
+  );
+  const unlinkedThreeViewItems = items.filter(
+    (entry) => entry.itemType === "three_view" && entry.parentItemId == null
+  );
+  if (initialItems.length !== 1 || unlinkedThreeViewItems.length !== 1) return null;
+
+  const initialItem = initialItems[0];
+  if (
+    items.some(
+      (entry) => entry.itemType === "three_view" && entry.parentItemId === initialItem.id
+    )
+  ) {
+    return null;
+  }
+
+  return { initialItem, threeViewItem: unlinkedThreeViewItems[0] };
+}
 
 function resolveRegenerationItemIds(items: AssetItem[], targetItem: AssetItem, assetType: string) {
-  const targetType = targetItem.itemType || "";
-  if (assetType !== "character" || !CHARACTER_BASE_ITEM_TYPES.has(targetType)) {
+  if (assetType !== "character") {
     return [targetItem.id];
   }
 
-  const threeViewItem = items.find((entry) => entry.itemType === "three_view");
-  const initialItem = items.find((entry) => entry.itemType === "initial");
-  const orderedIds = [threeViewItem?.id, initialItem?.id, targetItem.id].filter(
-    (id): id is number => typeof id === "number"
+  if (targetItem.itemType === "three_view") {
+    const parentItem = targetItem.parentItemId == null
+      ? resolveLegacyCharacterPair(items)?.initialItem
+      : items.find(
+          (entry) => entry.id === targetItem.parentItemId && isCharacterAppearanceItem(entry)
+        );
+    return parentItem ? [targetItem.id, parentItem.id] : [targetItem.id];
+  }
+
+  if (!isCharacterAppearanceItem(targetItem)) {
+    return [targetItem.id];
+  }
+
+  const threeViewItem = items.find(
+    (entry) => entry.itemType === "three_view" && entry.parentItemId === targetItem.id
+  );
+  const legacyThreeViewItem = targetItem.itemType === "initial"
+    ? resolveLegacyCharacterPair(items)?.threeViewItem
+    : undefined;
+
+  return threeViewItem || legacyThreeViewItem
+    ? [(threeViewItem || legacyThreeViewItem)!.id, targetItem.id]
+    : [targetItem.id];
+}
+
+function compareAssetItems(a: AssetItem, b: AssetItem) {
+  return a.sortOrder - b.sortOrder || a.id - b.id;
+}
+
+function orderAssetItems(items: AssetItem[], assetType: string) {
+  const sortedItems = [...items].sort(compareAssetItems);
+  if (assetType !== "character") return sortedItems;
+
+  const ordered: AssetItem[] = [];
+  const includedIds = new Set<number>();
+  const legacyPair = resolveLegacyCharacterPair(items);
+  const appearanceItems = sortedItems.filter(
+    (item) => isCharacterAppearanceItem(item) && item.parentItemId == null
   );
 
-  return [...new Set(orderedIds)];
+  for (const appearanceItem of appearanceItems) {
+    ordered.push(appearanceItem);
+    includedIds.add(appearanceItem.id);
+
+    const linkedThreeViews = sortedItems.filter(
+      (item) => item.itemType === "three_view" && item.parentItemId === appearanceItem.id
+    );
+    for (const threeViewItem of linkedThreeViews) {
+      ordered.push(threeViewItem);
+      includedIds.add(threeViewItem.id);
+    }
+
+    if (legacyPair?.initialItem.id === appearanceItem.id) {
+      ordered.push(legacyPair.threeViewItem);
+      includedIds.add(legacyPair.threeViewItem.id);
+    }
+  }
+
+  for (const item of sortedItems) {
+    if (!includedIds.has(item.id)) ordered.push(item);
+  }
+
+  return ordered;
+}
+
+function getThreeViewParent(items: AssetItem[], threeViewItem: AssetItem) {
+  if (threeViewItem.itemType !== "three_view") return null;
+  if (threeViewItem.parentItemId != null) {
+    return items.find((item) => item.id === threeViewItem.parentItemId) || null;
+  }
+  const legacyPair = resolveLegacyCharacterPair(items);
+  return legacyPair?.threeViewItem.id === threeViewItem.id
+    ? legacyPair.initialItem
+    : null;
+}
+
+function getAvailableAppearanceParents(items: AssetItem[], currentItemId?: number) {
+  const legacyPair = resolveLegacyCharacterPair(items);
+  return items
+    .filter(
+      (item) =>
+        item.id !== currentItemId &&
+        item.parentItemId == null &&
+        isCharacterAppearanceItem(item) &&
+        !(
+          legacyPair?.initialItem.id === item.id &&
+          legacyPair.threeViewItem.id !== currentItemId
+        ) &&
+        !items.some(
+          (candidate) =>
+            candidate.id !== currentItemId &&
+            candidate.itemType === "three_view" &&
+            candidate.parentItemId === item.id
+        )
+    )
+    .sort(compareAssetItems);
 }
 
 const assetTypeOptions = [
@@ -111,7 +230,16 @@ const itemTypeOptions = [
   { value: "initial", label: "初始图" },
   { value: "three_view", label: "三视图" },
   { value: "variant", label: "变体" },
+  { value: "age", label: "年龄形态" },
+  { value: "costume", label: "服装形态" },
+  { value: "damaged", label: "受伤形态" },
 ];
+
+const defaultItemTypeOptions = itemTypeOptions.filter(
+  (option) => ["initial", "variant"].includes(option.value)
+);
+
+const UNASSIGNED_PARENT_VALUE = "__unassigned__";
 
 // ========== Props 类型 ==========
 interface EditProps {
@@ -226,6 +354,7 @@ function CoverSelectorDialog({
           ) : (
             assets.map(a => {
               const isExpanded = expandedIds.has(a.id);
+              const displayedItems = orderAssetItems(a.items || [], a.type);
               return (
               <div key={a.id} className="border border-border/30 rounded-xl overflow-hidden bg-card/40 transition-all hover:bg-card/60">
                 <div 
@@ -247,8 +376,9 @@ function CoverSelectorDialog({
                       <div className="py-6 text-center text-xs text-muted-foreground/40">该资产暂无子资产</div>
                     ) : (
                       <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-                        {a.items.map(item => {
+                        {displayedItems.map(item => {
                            const urlStr = item.thumbnailUrl || item.imageUrl;
+                           const threeViewParent = getThreeViewParent(a.items || [], item);
                            return (
                              <div 
                                key={item.id} 
@@ -286,11 +416,18 @@ function CoverSelectorDialog({
                                    <span className="text-[10px] break-all line-clamp-2 leading-tight">{item.name || "无名资产"}</span>
                                  </div>
                                )}
-                               {urlStr && (
-                                 <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent text-[10px] text-white/90 truncate opacity-0 group-hover:opacity-100 transition-opacity font-medium">
-                                   {item.name || "未命名"}
-                                 </div>
-                               )}
+                                {urlStr && (
+                                  <div className="absolute inset-x-0 bottom-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent text-white/90 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <p className="text-[10px] font-medium truncate">{item.name || "未命名"}</p>
+                                    {item.itemType === "three_view" && (
+                                      <p className="text-[9px] text-white/65 truncate">
+                                        {threeViewParent
+                                          ? `所属：${threeViewParent.name || `子资产 ${threeViewParent.id}`}`
+                                          : "未关联角色形态"}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
                              </div>
                            );
                          })}
@@ -329,6 +466,9 @@ function AssetItemEditPanel({
 }) {
   const [name, setName] = useState(item.name || "");
   const [itemType, setItemType] = useState(item.itemType || "");
+  const [parentItemId, setParentItemId] = useState<number | null>(
+    item.parentItemId ?? getThreeViewParent(items, item)?.id ?? null
+  );
   const [imageUrl, setImageUrl] = useState(item.imageUrl || "");
   const [itemProperties, setItemProperties] = useState<Record<string, string>>({});
   const [itemFields, setItemFields] = useState<FieldDef[]>([]);
@@ -344,6 +484,7 @@ function AssetItemEditPanel({
   useEffect(() => {
     setName(item.name || "");
     setItemType(item.itemType || "");
+    setParentItemId(item.parentItemId ?? getThreeViewParent(items, item)?.id ?? null);
     setImageUrl(item.imageUrl || "");
     const p = parseProps(item.properties);
     setItemProperties(p);
@@ -351,7 +492,33 @@ function AssetItemEditPanel({
     setShowLightbox(false);
     setUrlMode(false);
     setGenerating(false);
-  }, [item]);
+  }, [item, items]);
+
+  const availableItemTypeOptions = assetType === "character"
+    ? item.itemType === "three_view"
+      ? itemTypeOptions.filter((option) => option.value === "three_view")
+      : itemTypeOptions.filter((option) => option.value !== "three_view")
+    : defaultItemTypeOptions;
+  const availableAppearanceParents = useMemo(
+    () => getAvailableAppearanceParents(items, item.id),
+    [item.id, items]
+  );
+  const selectedParent = parentItemId == null
+    ? null
+    : items.find((entry) => entry.id === parentItemId) || null;
+  const appearanceParentOptions = useMemo(() => {
+    const options = [...availableAppearanceParents];
+    if (
+      selectedParent &&
+      isCharacterAppearanceItem(selectedParent) &&
+      !options.some((entry) => entry.id === selectedParent.id)
+    ) {
+      options.unshift(selectedParent);
+    }
+    return options;
+  }, [availableAppearanceParents, selectedParent]);
+  const requiresAppearanceParent = assetType === "character" && itemType === "three_view";
+  const canSave = dirty && (!requiresAppearanceParent || parentItemId != null);
 
   useEffect(() => {
     if (!assetType) return;
@@ -376,12 +543,14 @@ function AssetItemEditPanel({
   };
 
   const handleSave = async () => {
+    if (requiresAppearanceParent && parentItemId == null) return;
     try {
       setSaving(true);
       await assetApi.updateItem({
         id: item.id,
         name: name || undefined,
         itemType: itemType || undefined,
+        parentItemId: itemType === "three_view" ? parentItemId : null,
         imageUrl: imageUrl || undefined,
         properties: JSON.stringify(itemProperties),
       });
@@ -496,10 +665,10 @@ function AssetItemEditPanel({
         </button>
         <button
           onClick={handleSave}
-          disabled={!dirty || saving || uploading}
+          disabled={!canSave || saving || uploading}
           className={cn(
             "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-            dirty
+            canSave
               ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20"
               : "bg-muted/30 text-muted-foreground/40 cursor-not-allowed"
           )}
@@ -628,19 +797,74 @@ function AssetItemEditPanel({
 
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">类型</label>
-              <Select value={itemType || ""} onValueChange={(v) => { if (v) { setItemType(v); setDirty(true); } }} items={itemTypeOptions}>
+              <Select
+                value={itemType || ""}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setItemType(v);
+                  if (v !== "three_view") setParentItemId(null);
+                  setDirty(true);
+                }}
+                items={availableItemTypeOptions}
+              >
                 <SelectTrigger size="sm" className="text-xs">
                   <SelectValue placeholder="选择类型" />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
                   <SelectGroup>
-                    {itemTypeOptions.map((opt) => (
+                    {availableItemTypeOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
+
+            {requiresAppearanceParent && (
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  所属角色形态
+                </label>
+                <Select
+                  value={parentItemId == null ? UNASSIGNED_PARENT_VALUE : String(parentItemId)}
+                  onValueChange={(value) => {
+                    if (!value || value === UNASSIGNED_PARENT_VALUE) return;
+                    setParentItemId(Number(value));
+                    setDirty(true);
+                  }}
+                  items={[
+                    { value: UNASSIGNED_PARENT_VALUE, label: "请选择所属角色形态" },
+                    ...appearanceParentOptions.map((entry) => ({
+                      value: String(entry.id),
+                      label: entry.name || `子资产 ${entry.id}`,
+                    })),
+                  ]}
+                >
+                  <SelectTrigger size="sm" className="w-full text-xs">
+                    <SelectValue placeholder="请选择所属角色形态" />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    <SelectGroup>
+                      <SelectItem value={UNASSIGNED_PARENT_VALUE} disabled className="text-xs">
+                        请选择所属角色形态
+                      </SelectItem>
+                      {appearanceParentOptions.map((entry) => (
+                        <SelectItem key={entry.id} value={String(entry.id)} className="text-xs">
+                          {entry.name || `子资产 ${entry.id}`}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {appearanceParentOptions.length === 0 ? (
+                  <p className="text-[10px] text-amber-400/80">
+                    暂无可关联形态，请先创建初始图、变体、年龄、服装或受伤形态。
+                  </p>
+                ) : parentItemId == null ? (
+                  <p className="text-[10px] text-amber-400/80">三视图必须关联一个角色形态。</p>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
 
@@ -719,20 +943,32 @@ function AssetItemEditPanel({
 function AssetItemCreatePanel({
   assetId,
   assetType,
+  items,
   onClose,
   onCreated,
 }: {
   assetId: number;
   assetType: string;
+  items: AssetItem[];
   onClose: () => void;
   onCreated: () => void;
 }) {
   const [name, setName] = useState("");
-  const [itemType, setItemType] = useState("");
+  const [itemType, setItemType] = useState("variant");
+  const [parentItemId, setParentItemId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [newItemProperties, setNewItemProperties] = useState<Record<string, string>>({});
   const [newItemFields, setNewItemFields] = useState<FieldDef[]>([]);
   const [newItemMetaLoading, setNewItemMetaLoading] = useState(false);
+  const availableItemTypeOptions = assetType === "character"
+    ? itemTypeOptions
+    : defaultItemTypeOptions;
+  const availableAppearanceParents = useMemo(
+    () => getAvailableAppearanceParents(items),
+    [items]
+  );
+  const requiresAppearanceParent = assetType === "character" && itemType === "three_view";
+  const canCreate = !!name.trim() && (!requiresAppearanceParent || parentItemId != null);
 
   useEffect(() => {
     if (!assetType) return;
@@ -756,13 +992,14 @@ function AssetItemCreatePanel({
   };
 
   const handleCreate = async () => {
-    if (!name.trim()) return;
+    if (!canCreate) return;
     try {
       setCreating(true);
       await assetApi.createItem({
         assetId,
         name: name.trim(),
         itemType: itemType || undefined,
+        parentItemId: itemType === "three_view" ? parentItemId : null,
         properties: JSON.stringify(newItemProperties),
       });
       onCreated();
@@ -788,10 +1025,10 @@ function AssetItemCreatePanel({
         </div>
         <button
           onClick={handleCreate}
-          disabled={!name.trim() || creating}
+          disabled={!canCreate || creating}
           className={cn(
             "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-            name.trim()
+            canCreate
               ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20"
               : "bg-muted/30 text-muted-foreground/40 cursor-not-allowed"
           )}
@@ -824,19 +1061,74 @@ function AssetItemCreatePanel({
 
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">类型</label>
-              <Select value={itemType || ""} onValueChange={(v) => { if (v) setItemType(v); }} items={itemTypeOptions}>
+              <Select
+                value={itemType || ""}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setItemType(v);
+                  setParentItemId(null);
+                }}
+                items={availableItemTypeOptions}
+              >
                 <SelectTrigger size="sm" className="text-xs">
                   <SelectValue placeholder="选择类型" />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
                   <SelectGroup>
-                    {itemTypeOptions.map((opt) => (
+                    {availableItemTypeOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
+
+            {requiresAppearanceParent && (
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground font-medium">
+                  所属角色形态
+                </label>
+                <Select
+                  value={parentItemId == null ? UNASSIGNED_PARENT_VALUE : String(parentItemId)}
+                  onValueChange={(value) => {
+                    if (!value || value === UNASSIGNED_PARENT_VALUE) return;
+                    setParentItemId(Number(value));
+                  }}
+                  items={[
+                    { value: UNASSIGNED_PARENT_VALUE, label: "请选择所属角色形态" },
+                    ...availableAppearanceParents.map((entry) => ({
+                      value: String(entry.id),
+                      label: entry.name || `子资产 ${entry.id}`,
+                    })),
+                  ]}
+                >
+                  <SelectTrigger size="sm" className="w-full text-xs">
+                    <SelectValue placeholder="请选择所属角色形态" />
+                  </SelectTrigger>
+                  <SelectContent className="text-xs">
+                    <SelectGroup>
+                      <SelectItem value={UNASSIGNED_PARENT_VALUE} disabled className="text-xs">
+                        请选择所属角色形态
+                      </SelectItem>
+                      {availableAppearanceParents.map((entry) => (
+                        <SelectItem key={entry.id} value={String(entry.id)} className="text-xs">
+                          {entry.name || `子资产 ${entry.id}`}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {availableAppearanceParents.length === 0 ? (
+                  <p className="text-[10px] text-amber-400/80">
+                    暂无可关联形态，请先创建初始图、变体、年龄、服装或受伤形态。
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground/60">
+                    一个角色形态只能关联一个三视图。
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
@@ -936,6 +1228,10 @@ export default function AssetDetailPanel(props: Props) {
   const [selectedItem, setSelectedItem] = useState<AssetItem | null>(null);
   const [isCreatingItem, setIsCreatingItem] = useState(false);
   const isItemPanelOpen = !!selectedItem || isCreatingItem;
+  const displayedItems = useMemo(
+    () => orderAssetItems(items, asset?.type || ""),
+    [asset?.type, items]
+  );
 
   useEffect(() => {
     if (!asset) return;
@@ -1488,8 +1784,9 @@ export default function AssetDetailPanel(props: Props) {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-2.5">
-                {items.map((item) => {
+                {displayedItems.map((item) => {
                   const isItemSelected = selectedItem?.id === item.id;
+                  const threeViewParent = getThreeViewParent(items, item);
                   return (
                     <div
                       key={item.id}
@@ -1534,11 +1831,30 @@ export default function AssetDetailPanel(props: Props) {
                         </button>
                       </div>
                       {/* 信息 */}
-                      <div className="px-2.5 py-2">
+                      <div className="px-2.5 py-2 min-h-12">
                         <p className="text-[11px] font-medium truncate">{item.name || "未命名"}</p>
-                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-foreground/5 text-muted-foreground/50">
-                          {itemTypeOptions.find((o) => o.value === item.itemType)?.label || item.itemType || "未分类"}
-                        </span>
+                        <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                          <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-foreground/5 text-muted-foreground/50">
+                            {itemTypeOptions.find((o) => o.value === item.itemType)?.label || item.itemType || "未分类"}
+                          </span>
+                          {item.itemType === "three_view" && (
+                            <span
+                              className={cn(
+                                "text-[9px] truncate",
+                                threeViewParent ? "text-cyan-400/70" : "text-amber-400/80"
+                              )}
+                              title={
+                                threeViewParent
+                                  ? `所属角色形态：${threeViewParent.name || `子资产 ${threeViewParent.id}`}`
+                                  : "未关联角色形态"
+                              }
+                            >
+                              {threeViewParent
+                                ? `所属：${threeViewParent.name || `子资产 ${threeViewParent.id}`}`
+                                : "未关联角色形态"}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1564,6 +1880,7 @@ export default function AssetDetailPanel(props: Props) {
           <AssetItemCreatePanel
             assetId={asset.id}
             assetType={asset.type}
+            items={items}
             onClose={() => setIsCreatingItem(false)}
             onCreated={() => {
               setIsCreatingItem(false);

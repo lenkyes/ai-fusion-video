@@ -14,6 +14,9 @@ public class AssetItemCreateReqVO {
     @NotNull(message = "资产ID不能为空")
     private Long assetId;
 
+    @Schema(description = "形态根项ID；创建角色 three_view 时指定")
+    private Long parentItemId;
+
     private String itemType;
     private String name;
     private String imageUrl;

@@ -14,6 +14,9 @@ public class AssetItemUpdateReqVO {
     @NotNull(message = "子资产ID不能为空")
     private Long id;
 
+    @Schema(description = "形态根项ID；用于绑定或修复角色 three_view 归属")
+    private Long parentItemId;
+
     private String itemType;
     private String name;
     private String imageUrl;

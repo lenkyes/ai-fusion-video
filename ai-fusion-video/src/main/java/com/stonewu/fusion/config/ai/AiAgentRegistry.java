@@ -250,7 +250,7 @@ public class AiAgentRegistry {
                                                 AiAgentDefinition.SubAgentToolDef.builder()
                                                                 .toolName("storyboard_asset_preprocessor")
                                                                 .displayName("子资产预处理器")
-                                                                .description("分析所有分集剧本内容，识别角色/场景/道具的外观变化，统一创建所需的子资产变体并保存到数据库。此工具必须在 episode_storyboard_writer 之前调用，且只调用一次。调用时只传声明中要求的业务参数，不要传 session_id，框架会自动维护会话。")
+                                                                .description("分析所有分集剧本内容，识别角色/场景/道具的外观变化，统一创建所需的形态根项并保存到数据库。角色三视图由后端按 parentItemId 自动与各形态根项一一配对，不手工创建全局三视图。此工具必须在 episode_storyboard_writer 之前调用，且只调用一次。调用时只传声明中要求的业务参数，不要传 session_id，框架会自动维护会话。")
                                                                 .parametersSchema(
                                                                                 """
                                                                                                 {
@@ -283,7 +283,7 @@ public class AiAgentRegistry {
                                                 AiAgentDefinition.SubAgentToolDef.builder()
                                                                 .toolName("episode_storyboard_writer")
                                                                 .displayName("分集分镜编写器")
-                                                                .description("对指定分集进行分镜转换。输入分集编号，子Agent会自动查询场次内容、获取最新资产列表（含预处理器已创建的子资产）、设计镜头并保存分镜数据。可同时调用多个实例并行处理不同分集。调用时只传声明中要求的业务参数，不要传 session_id，框架会自动维护会话。")
+                                                                .description("对指定分集进行分镜转换。输入分集编号，子Agent会自动查询场次内容、获取最新资产列表，按 parentItemId 为明确年龄/换装选择对应形态的专属三视图，设计镜头并保存分镜数据；不得回退默认形态或其他年龄三视图。可同时调用多个实例并行处理不同分集。调用时只传声明中要求的业务参数，不要传 session_id，框架会自动维护会话。")
                                                                 .parametersSchema(
                                                                                 """
                                                                                                 {
@@ -398,7 +398,7 @@ public class AiAgentRegistry {
          * 注册分镜子资产预处理子 Agent
          * <p>
          * 串行执行（只调用一次），负责分析所有分集剧本内容，
-         * 识别角色/场景/道具的外观变化，统一创建子资产变体，
+         * 识别角色/场景/道具的外观变化，统一创建形态根项，
          * 返回完整的 assetItemMapping 供分镜编写子 Agent 使用。
          */
         private void registerStoryboardAssetPreprocessorAgent() {
@@ -416,7 +416,7 @@ public class AiAgentRegistry {
                                                 <script_id>{scriptId}</script_id>
                                                 </task_context>
 
-                                                请根据主 Agent 提供的 episodeIds，逐集分析剧本内容并创建所需的子资产变体。""")
+                                                请根据主 Agent 提供的 episodeIds，逐集分析剧本内容并创建所需的形态根项；角色专属三视图由后端按 parentItemId 自动补齐，不要手工创建全局三视图。""")
                                 .enableTools(1)
                                 .build());
         }
@@ -441,15 +441,20 @@ public class AiAgentRegistry {
 
                                                                                 调用时 message 必须包含以下信息（每行一个键值对）：
                                                                                 - assetId: 主资产ID（数字，必传）
-                                                                                - itemId: 子资产ID（数字，必传）
+                                                                                - itemId: 本次实际生成的子资产ID（数字，必传）
+                                                                                - appearanceItemId: 角色形态根项ID（数字，角色任务必传）
+                                                                                - canonicalThreeViewItemId: 该形态专属三视图ID（数字，角色任务必传）
                                                                                 - projectId: 项目ID（数字，必传）
-                                                                                - characterCanonicalMode: 是否使用角色基础母版模式（true/false，可选；角色 initial/three_view 传 true）
+                                                                                - characterCanonicalMode: 是否使用角色形态母版模式（true/false，可选；角色形态根项/专属 three_view 传 true）
+                                                                                - 角色任务分发前必须查询并校验 canonicalThreeViewItemId 对应项满足 parentItemId=appearanceItemId；只允许同组联动，严禁传入该角色第一个或其他年龄的 three_view
                                                                                 - 不要额外传 session_id，框架会自动维护会话
 
                                                                                 message 格式示例：
                                                                                 请为子资产生成图片。
                                                                                 assetId: 1
                                                                                 itemId: 3
+                                                                                appearanceItemId: 2
+                                                                                canonicalThreeViewItemId: 3
                                                                                 projectId: 5
                                                                                 characterCanonicalMode: true""")
                                                                 .refAgentType("asset_image_executor")
@@ -525,7 +530,7 @@ public class AiAgentRegistry {
                                                                                 styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
                                                                                 referenceOrderPolicy: {视频参考图只包含角色、场景、关键道具等资产图；不要传项目预设画风图、/api/art-styles/** 或 /art-styles/**；角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
                                                                                 characterLocks:
-                                                                                - {角色名}: assetItemId={子资产ID}, itemType={three_view/variant/initial}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定外观锚点；three_view 用于锁定正/侧/背外观和最右侧脸部表情特写中的脸部特征}
+                                                                                - {角色名}: assetItemId={专属三视图子资产ID}, appearanceItemId={形态根项ID}, parentItemId={应等于 appearanceItemId}, itemType=three_view, imageUrl={该形态专属三视图URL或空}, appearance={来自该形态 properties/分镜的年龄、体型、发型、服装等稳定锚点；不得混用其他形态三视图}
                                                                                 sceneLocks:
                                                                                 - {场景名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, environment={来自资产/分镜的稳定空间结构和光线锚点}
                                                                                 propLocks:

@@ -54,7 +54,8 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
         return String.format("""
                 为指定主资产批量创建子资产变体。
                 每个主资产创建时会自动生成一个**初始子资产**（默认变体），图片挂在子资产上而非主资产。
-                角色资产还应拥有一个 itemType=three_view 的基础三视图子资产，用于生成正面/侧面/背面全身 + 脸部表情特写同屏的角色参考图。
+                每个角色形态根项（initial/variant/age/costume/damaged）都会自动配对一个专属 itemType=three_view，
+                用于生成该形态的正面/侧面/背面全身 + 脸部表情特写同屏参考图。
                 新建子资产变体代表角色/场景在**外观上有显著变化**的其他版本，每个子资产对应一张独立的参考图片。
 
                 **何时需要创建新子资产（外观发生显著变化）**：
@@ -102,7 +103,7 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                 2. 工具自动按 assetId + name 去重，已存在的同名子资产会被复用
                 3. 子资产的 properties 仅填写该子资产特有的属性值，不要重复主资产已有的 properties
                 4. 调用前应先使用 query_asset_items 查看已有子资产，避免重复创建
-                5. 角色三视图请使用 itemType=three_view，名称建议为"角色名 三视图"，内容是正/侧/背全身 + 脸部表情特写参考表，properties 可沿用角色基础外貌属性
+                5. 正常创建角色形态根项即可，系统会自动创建专属三视图；仅修复旧未绑定数据时才手动创建 three_view，并必须指定明确的 parentItemId
                 6. 宁可少创建，不要多创建。对于不确定是否需要的变体，优先复用初始子资产
 
                 返回值：
@@ -140,6 +141,10 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                                     "itemType": {
                                         "type": "string",
                                         "description": "子资产类型（可选），如 three_view（角色三视图）、variant（外观变体）、costume（服装变化）、age（年龄变化）、damaged（损坏状态）等，默认为 variant"
+                                    },
+                                    "parentItemId": {
+                                        "type": "number",
+                                        "description": "形态根项ID。仅手动创建 three_view 时使用；角色有多个形态时必填"
                                     },
                                     "properties": {
                                         "type": "object",
@@ -187,7 +192,7 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
             }
 
             // 查询已有子资产（用于去重）
-            List<AssetItem> existingItems = assetService.listItems(assetId);
+            List<AssetItem> existingItems = new ArrayList<>(assetService.listItems(assetId));
 
             List<JSONObject> created = new ArrayList<>();
             List<JSONObject> existing = new ArrayList<>();
@@ -205,10 +210,20 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                         .findFirst().orElse(null);
 
                 if (found != null) {
+                    Long appearanceItemId = "character".equals(asset.getType())
+                            ? assetService.resolveAppearanceItemId(found)
+                            : null;
+                    Long canonicalThreeViewItemId = "character".equals(asset.getType())
+                            ? assetService.resolveCanonicalThreeViewItemId(found)
+                            : null;
                     existing.add(JSONUtil.createObj()
                             .set("assetItemId", found.getId())
                             .set("name", found.getName())
-                            .set("itemType", found.getItemType()));
+                            .set("itemType", found.getItemType())
+                            .set("parentItemId",
+                                    "character".equals(asset.getType()) ? found.getParentItemId() : null)
+                            .set("appearanceItemId", appearanceItemId)
+                            .set("canonicalThreeViewItemId", canonicalThreeViewItemId));
                     log.info("子资产已存在，复用: assetId={}, name={}, itemId={}", assetId, name, found.getId());
                     continue;
                 }
@@ -216,6 +231,7 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                 // 创建新子资产
                 AssetItem newItem = AssetItem.builder()
                         .assetId(assetId)
+                        .parentItemId(itemData.getLong("parentItemId"))
                         .name(name)
                         .itemType(itemData.getStr("itemType", "variant"))
                         .sourceType(SOURCE_AI_GENERATED)
@@ -224,11 +240,26 @@ public class BatchCreateAssetItemsToolExecutor implements ToolExecutor {
                         .build();
 
                 AssetItem saved = assetService.createItem(newItem);
+                Long appearanceItemId = "character".equals(asset.getType())
+                        ? assetService.resolveAppearanceItemId(saved)
+                        : null;
+                AssetItem canonicalThreeView = appearanceItemId != null
+                        ? assetService.findCanonicalThreeViewItem(appearanceItemId)
+                        : null;
 
                 created.add(JSONUtil.createObj()
                         .set("assetItemId", saved.getId())
                         .set("name", name)
-                        .set("itemType", newItem.getItemType()));
+                        .set("itemType", newItem.getItemType())
+                        .set("parentItemId",
+                                "character".equals(asset.getType()) ? saved.getParentItemId() : null)
+                        .set("appearanceItemId", appearanceItemId)
+                        .set("canonicalThreeViewItemId",
+                                canonicalThreeView != null ? canonicalThreeView.getId() : null));
+                existingItems.add(saved);
+                if (canonicalThreeView != null && !existingItems.contains(canonicalThreeView)) {
+                    existingItems.add(canonicalThreeView);
+                }
             }
 
             // 合并结果

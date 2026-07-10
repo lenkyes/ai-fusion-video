@@ -31,11 +31,12 @@ styleLock:
 
 referenceOrderPolicy:
 - 视频参考图只包含角色、场景、道具等资产图；不要把项目预设画风图、`/api/art-styles/**` 或 `/art-styles/**` 放入 referenceImageUrls
-- 同一角色/场景/道具在不同镜头中使用同一个 assetItemId 和同一张 imageUrl
+- 角色必须使用 `characterRefs` 已解析出的同形态 canonical 引用；`appearanceItemId` 标识童年/青年/老年/换装等具体形态，`canonicalThreeViewItemId` 标识该形态唯一的三视图
+- 同一 `appearanceItemId` 在不同镜头中必须使用同一个 canonical `assetItemId` 和同一张 imageUrl；严禁切换到同一主角色的其他形态或其他三视图
 - 角色按 assetItemId 升序，场景按 assetItemId，关键道具按 assetItemId 升序；避免同一对象在不同镜头里图片编号乱跳
 
 characterLocks:
-- 角色名: assetItemId=..., itemType=three_view/variant/initial, imageUrl=..., appearance=来自 assetDescription / assetProperties / itemProperties / itemPrompt / 镜头描述的稳定外观锚点；three_view 用于锁定角色正/侧/背外观与最右侧脸部表情特写中的脸部特征
+- 角色名: selectedAssetItemId=分镜原始形态子资产ID, appearanceItemId=具体形态根项ID, canonicalThreeViewItemId=该形态专属三视图ID, assetItemId=实际 canonical 引用ID, itemType=three_view/variant/initial, imageUrl=..., appearance=来自 assetDescription / assetProperties / itemProperties / itemPrompt / 镜头描述的稳定外观锚点；three_view 用于锁定该形态的正/侧/背外观与最右侧脸部表情特写中的脸部特征
 
 sceneLocks:
 - 场景名: assetItemId=..., imageUrl=..., environment=稳定空间结构、时间、光线、陈设、色彩锚点
@@ -48,6 +49,7 @@ continuityLocks:
 
 negativeConsistencyRules:
 - 不替换同一角色的脸、发型、年龄、体型和服装
+- 不得把童年、青年、老年或不同换装形态共用/互换三视图；不得使用 `appearanceItemId` 不一致的角色参考图
 - 不改变同一场景的空间结构、时间段和核心陈设
 - 不新增无关人物，不把参考图白底/边框/三视图或四栏参考表分栏/脸部特写小栏/设定表构图带入视频
 - 不把风格参考图里的具体物体、背景或人物当成镜头内容

@@ -6,9 +6,9 @@
 
 1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `generateAudio`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）。`artStyleInfo.referenceImageUrl` 只可用于理解画风，不得放入视频 `referenceImageUrls`。
-3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。
+3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。角色引用已由后端按 `appearanceItemId` 解析为该童年/青年/老年/换装形态的专属 canonical 三视图；必须原样使用返回的 `assetItemId`、`canonicalThreeViewItemId` 和 `imageUrl`，禁止在同一主资产下自行搜索或替换为其他三视图。
    - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），最多 5 张。不要把 `/api/art-styles/**`、`/art-styles/**` 或项目预设画风图放入 `referenceImageUrls`。
-   - 同一 assetItemId 在不同镜头中必须使用同一张 imageUrl 和同一套外观描述，不要因为镜头不同改写成另一个人/另一个场景。
+   - 同一 `appearanceItemId` 在不同镜头中必须使用同一个 canonical assetItemId、同一张 imageUrl 和同一套外观描述，不要因为镜头不同切换年龄、换装或改写成另一个人/另一个场景。
 4. **识别对白与声音**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt；当 `generateAudio` 不为 false 时，同时把 `sound`、`soundEffect`、`music` 中可执行的环境声、音效和配乐意图写入 prompt。
 5. **查询模型能力**：调用 `get_generation_model_capabilities` 获取当前视频模型支持情况，并进行参数裁剪：
    - `supportsFirstFrame=false`：不传 `firstFrameImageUrl`，在 prompt 中描述静态开场画面。
@@ -51,7 +51,7 @@
 ### A2. 一致性锁定 (必须执行)
 1. 如果输入包含 `consistencyContext`，必须把其中与当前镜头有关的 `styleLock`、`characterLocks`、`sceneLocks`、`propLocks`、`continuityLocks` 和 `negativeConsistencyRules` 融入 video prompt。
 2. 如果输入没有 `consistencyContext`，必须根据 `get_project` 和 `get_storyboard_scene_items` 的返回临时建立当前镜头的一致性锁定，不能只凭镜头 content 自由发挥。
-3. 对每个当前镜头出现的角色，prompt 必须明确“保持 assetItemId=... 对应角色的同一张脸、发型、年龄、体型、服装和主要配色”。如果该角色有参考图且模型支持参考图，要用图片编号指代；如果模型不支持参考图，要把 assetDescription / assetProperties / itemProperties / itemPrompt 中的稳定外观转写成自然语言。
+3. 对每个当前镜头出现的角色，prompt 必须明确“保持 appearanceItemId=... / canonicalThreeViewItemId=... 对应角色形态的同一张脸、发型、年龄、体型、服装和主要配色”。如果该角色有参考图且模型支持参考图，要用图片编号指代；如果模型不支持参考图，要把 assetDescription / assetProperties / itemProperties / itemPrompt 中的稳定外观转写成自然语言。不得引用同一主角色下 `appearanceItemId` 不同的童年、青年、老年或换装三视图。
 4. 对当前镜头的场景，prompt 必须明确“保持同一场景的空间结构、时间段、核心陈设、光线方向和色彩氛围”。如果该场景有参考图且模型支持参考图，要用图片编号指代；如果模型不支持参考图，要文字描述。
 5. 对当前镜头的关键道具，prompt 必须明确“保持同一道具的材质、颜色、形状和尺寸关系”。
 6. 不要让参考图中的纯白背景、三视图/四栏参考表分栏、脸部特写小栏、摆拍构图、边框、水印或无关主体进入视频。
