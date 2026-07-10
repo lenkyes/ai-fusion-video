@@ -1,9 +1,11 @@
 package com.stonewu.fusion.service.storyboard;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.stonewu.fusion.controller.storyboard.vo.ComposeEpisodeVideoReqVO;
 import com.stonewu.fusion.entity.storage.StorageConfig;
 import com.stonewu.fusion.entity.storyboard.Storyboard;
 import com.stonewu.fusion.entity.storyboard.StoryboardEpisode;
+import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.entity.storyboard.StoryboardScene;
 import com.stonewu.fusion.mapper.storyboard.StoryboardEpisodeMapper;
 import com.stonewu.fusion.mapper.storyboard.StoryboardSceneMapper;
@@ -21,6 +23,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -142,6 +147,101 @@ class VideoComposeServiceTests {
         assertThat(taskId).isEqualTo("task-scene-1");
         verify(sceneMapper).update(eq(null), any(UpdateWrapper.class));
         verify(videoComposeExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void composeOptionsBurnSubtitlesByDefault() {
+        VideoComposeService.ComposeOptions defaults = VideoComposeService.ComposeOptions.defaults();
+        VideoComposeService.ComposeOptions emptyRequest = VideoComposeService.ComposeOptions.from(
+                new ComposeEpisodeVideoReqVO()
+        );
+
+        assertThat(defaults.generateSubtitleFiles()).isTrue();
+        assertThat(defaults.burnSubtitles()).isTrue();
+        assertThat(emptyRequest.burnSubtitles()).isTrue();
+    }
+
+    @Test
+    void subtitleLayoutFollowsPortraitVideoDimensions() {
+        VideoComposeService.VideoDimensions dimensions = VideoComposeService.parseVideoDimensions("720x1280\n");
+        VideoComposeService.SubtitleLayout layout = VideoComposeService.resolveSubtitleLayout(dimensions);
+
+        assertThat(dimensions).isEqualTo(new VideoComposeService.VideoDimensions(720, 1280));
+        assertThat(layout.playResX()).isEqualTo(720);
+        assertThat(layout.playResY()).isEqualTo(1280);
+        assertThat(layout.fontSize()).isEqualTo(36);
+        assertThat(layout.horizontalMargin()).isEqualTo(36);
+        assertThat(layout.verticalMargin()).isEqualTo(83);
+        assertThat(layout.maxLineDisplayWidth()).isEqualTo(32);
+    }
+
+    @Test
+    void wrapSubtitleTextWrapsChineseAndLongEnglishTokensWithoutLosingText() {
+        String chinese = "字幕".repeat(20);
+        String wrappedChinese = VideoComposeService.wrapSubtitleText(chinese, 32);
+        String wrappedEnglish = VideoComposeService.wrapSubtitleText("alpha beta gamma delta", 14);
+        String longToken = "abcdefghijklmnopqrstuvwxyz0123456789";
+        String wrappedLongToken = VideoComposeService.wrapSubtitleText(longToken, 10);
+        String wrappedWideToken = VideoComposeService.wrapSubtitleText("W".repeat(12), 10);
+
+        assertThat(wrappedChinese).contains("\n");
+        assertThat(wrappedChinese.replace("\n", "")).isEqualTo(chinese);
+        assertThat(wrappedChinese.split("\n"))
+                .allMatch(line -> line.codePointCount(0, line.length()) <= 16);
+        assertThat(wrappedEnglish).isEqualTo("alpha beta\ngamma delta");
+        assertThat(wrappedLongToken).contains("\n");
+        assertThat(wrappedLongToken.replace("\n", "")).isEqualTo(longToken);
+        assertThat(wrappedLongToken.split("\n"))
+                .allMatch(line -> line.codePointCount(0, line.length()) <= 10);
+        assertThat(wrappedWideToken.split("\n"))
+                .allMatch(line -> line.length() <= 5);
+    }
+
+    @Test
+    void wrapSubtitleTextPreservesManualBreaksAndEmojiGraphemes() {
+        String familyEmoji = "👨‍👩‍👧‍👦";
+        String text = "手动第一行\n甲" + familyEmoji + "乙丙丁戊己庚辛";
+
+        String wrapped = VideoComposeService.wrapSubtitleText(text, 12);
+
+        assertThat(wrapped).startsWith("手动第一行\n");
+        assertThat(wrapped).contains(familyEmoji);
+        assertThat(wrapped.replace("\n", "")).isEqualTo(text.replace("\n", ""));
+    }
+
+    @Test
+    void buildSubtitleFilesWritesWrappedSrtAndAssForPortraitVideo() throws IOException {
+        String dialogue = "字幕".repeat(20);
+        Path tempDir = Path.of("target", "subtitle-layout-test");
+        Files.createDirectories(tempDir);
+        when(storyboardService.listItemsByScene(101L)).thenReturn(List.of(
+                StoryboardItem.builder()
+                        .id(201L)
+                        .sortOrder(0)
+                        .videoUrl("/media/videos/demo.mp4")
+                        .duration(BigDecimal.valueOf(5))
+                        .dialogue(dialogue)
+                        .build()
+        ));
+        List<?> clips = ReflectionTestUtils.invokeMethod(videoComposeService, "collectSceneComposeClips", 101L);
+
+        ReflectionTestUtils.invokeMethod(
+                videoComposeService,
+                "buildSubtitleFiles",
+                tempDir,
+                clips,
+                new VideoComposeService.VideoDimensions(720, 1280)
+        );
+
+        String wrapped = VideoComposeService.wrapSubtitleText(dialogue, 32);
+        String srt = Files.readString(tempDir.resolve("subtitles.srt"));
+        String ass = Files.readString(tempDir.resolve("subtitles.ass"));
+        assertThat(srt).contains(wrapped);
+        assertThat(ass)
+                .contains("PlayResX: 720")
+                .contains("PlayResY: 1280")
+                .contains("WrapStyle: 0")
+                .contains(wrapped.replace("\n", "\\N"));
     }
 
     @Test

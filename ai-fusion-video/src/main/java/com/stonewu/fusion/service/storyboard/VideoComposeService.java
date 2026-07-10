@@ -37,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.text.BreakIterator;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -48,6 +49,8 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 按集合成视频服务。
@@ -76,6 +79,13 @@ public class VideoComposeService {
     private static final double DEFAULT_ORIGINAL_AUDIO_VOLUME = 1.0;
     private static final double DEFAULT_BGM_VOLUME = 0.25;
     private static final double MAX_AUDIO_VOLUME = 2.0;
+    private static final VideoDimensions DEFAULT_VIDEO_DIMENSIONS = new VideoDimensions(1920, 1080);
+    private static final int MAX_PROBED_VIDEO_DIMENSION = 32768;
+    private static final double SUBTITLE_FONT_SIZE_RATIO = 0.05;
+    private static final double SUBTITLE_HORIZONTAL_MARGIN_RATIO = 0.05;
+    private static final double SUBTITLE_VERTICAL_MARGIN_RATIO = 0.065;
+    private static final double SUBTITLE_LINE_WIDTH_SAFETY_RATIO = 0.9;
+    private static final Pattern SUBTITLE_GRAPHEME_PATTERN = Pattern.compile("\\X");
 
     private final StoryboardService storyboardService;
     private final StoryboardEpisodeMapper episodeMapper;
@@ -246,8 +256,6 @@ public class VideoComposeService {
                 localFiles.add(local);
             }
 
-            SubtitleFiles subtitleFiles = buildSubtitleFiles(workDir, clips);
-
             Path listFile = workDir.resolve("list.txt");
             StringBuilder sb = new StringBuilder();
             for (Path f : localFiles) {
@@ -265,6 +273,9 @@ public class VideoComposeService {
             if (!ok || !Files.exists(output) || Files.size(output) == 0) {
                 throw new RuntimeException("ffmpeg 合成失败（concat 与 filter 均失败）");
             }
+
+            VideoDimensions videoDimensions = probeVideoDimensions(output);
+            SubtitleFiles subtitleFiles = buildSubtitleFiles(workDir, clips, videoDimensions);
 
             Path bgmFile = null;
             if (StringUtils.hasText(options.bgmUrl())) {
@@ -370,23 +381,30 @@ public class VideoComposeService {
         return clips;
     }
 
-    private SubtitleFiles buildSubtitleFiles(Path workDir, List<ComposeClip> clips) throws IOException {
+    private SubtitleFiles buildSubtitleFiles(Path workDir, List<ComposeClip> clips,
+                                              VideoDimensions videoDimensions) throws IOException {
         Path srtFile = workDir.resolve("subtitles.srt");
         Path assFile = workDir.resolve("subtitles.ass");
+        SubtitleLayout layout = resolveSubtitleLayout(videoDimensions);
 
         StringBuilder srt = new StringBuilder();
         StringBuilder ass = new StringBuilder();
         ass.append("[Script Info]\n")
                 .append("ScriptType: v4.00+\n")
-                .append("PlayResX: 1920\n")
-                .append("PlayResY: 1080\n")
+                .append("PlayResX: ").append(layout.playResX()).append('\n')
+                .append("PlayResY: ").append(layout.playResY()).append('\n')
+                .append("WrapStyle: 0\n")
                 .append("ScaledBorderAndShadow: yes\n\n")
                 .append("[V4+ Styles]\n")
                 .append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ")
                 .append("Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, ")
                 .append("Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
-                .append("Style: Default,Arial,54,&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,")
-                .append("0,0,0,0,100,100,0,0,1,2,0,2,80,80,70,1\n\n")
+                .append("Style: Default,Arial,").append(layout.fontSize())
+                .append(",&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,")
+                .append("0,0,0,0,100,100,0,0,1,2,0,2,")
+                .append(layout.horizontalMargin()).append(',')
+                .append(layout.horizontalMargin()).append(',')
+                .append(layout.verticalMargin()).append(",1\n\n")
                 .append("[Events]\n")
                 .append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
 
@@ -397,16 +415,17 @@ public class VideoComposeService {
             double durationSeconds = resolveClipDurationSeconds(clip.item());
             String text = cleanDialogue(clip.item().getDialogue());
             if (StringUtils.hasText(text)) {
+                String wrappedText = wrapSubtitleText(text, layout.maxLineDisplayWidth());
                 double start = cursorSeconds;
                 double end = cursorSeconds + durationSeconds;
                 srt.append(subtitleIndex).append('\n')
                         .append(formatSrtTime(start)).append(" --> ").append(formatSrtTime(end)).append('\n')
-                        .append(escapeSrtText(text)).append("\n\n");
+                        .append(escapeSrtText(wrappedText)).append("\n\n");
                 ass.append("Dialogue: 0,")
                         .append(formatAssTime(start)).append(',')
                         .append(formatAssTime(end))
                         .append(",Default,,0,0,0,,")
-                        .append(escapeAssText(text))
+                        .append(escapeAssText(wrappedText))
                         .append('\n');
                 hasSubtitle = true;
                 subtitleIndex++;
@@ -417,6 +436,182 @@ public class VideoComposeService {
         Files.writeString(srtFile, srt.toString(), StandardCharsets.UTF_8);
         Files.writeString(assFile, ass.toString(), StandardCharsets.UTF_8);
         return new SubtitleFiles(srtFile, assFile, hasSubtitle);
+    }
+
+    static SubtitleLayout resolveSubtitleLayout(VideoDimensions dimensions) {
+        // 行宽使用半个全角字符为一个单位，让中英文共用同一套安全宽度。
+        VideoDimensions safeDimensions = dimensions != null && dimensions.isValid()
+                ? dimensions
+                : DEFAULT_VIDEO_DIMENSIONS;
+        int width = safeDimensions.width();
+        int height = safeDimensions.height();
+        int shortSide = Math.min(width, height);
+        int fontSize = Math.max(16, (int) Math.round(shortSide * SUBTITLE_FONT_SIZE_RATIO));
+        int horizontalMargin = Math.max(fontSize,
+                (int) Math.round(width * SUBTITLE_HORIZONTAL_MARGIN_RATIO));
+        int verticalMargin = Math.max(fontSize,
+                (int) Math.round(height * SUBTITLE_VERTICAL_MARGIN_RATIO));
+        int usableWidth = Math.max(fontSize, width - horizontalMargin * 2);
+        int maxLineDisplayWidth = Math.max(4, (int) Math.floor(
+                usableWidth * 2.0 / fontSize * SUBTITLE_LINE_WIDTH_SAFETY_RATIO
+        ));
+        return new SubtitleLayout(width, height, fontSize, horizontalMargin, verticalMargin,
+                maxLineDisplayWidth);
+    }
+
+    static String wrapSubtitleText(String text, int maxLineDisplayWidth) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        int safeMaxWidth = Math.max(4, maxLineDisplayWidth);
+        List<String> wrappedLines = new ArrayList<>();
+        for (String paragraph : normalized.split("\n", -1)) {
+            if (paragraph.isBlank()) {
+                wrappedLines.add("");
+            } else {
+                wrappedLines.addAll(wrapSubtitleParagraph(paragraph.strip(), safeMaxWidth));
+            }
+        }
+        return String.join("\n", wrappedLines);
+    }
+
+    private static List<String> wrapSubtitleParagraph(String paragraph, int maxLineDisplayWidth) {
+        // 优先采用 Unicode 自然断行点；无断点的长文本再按完整 grapheme 硬拆。
+        List<SubtitleGrapheme> graphemes = subtitleGraphemes(paragraph);
+        if (graphemes.isEmpty()) {
+            return List.of("");
+        }
+
+        boolean[] naturalBreaks = new boolean[paragraph.length() + 1];
+        BreakIterator lineIterator = BreakIterator.getLineInstance(Locale.CHINA);
+        lineIterator.setText(paragraph);
+        for (int boundary = lineIterator.first(); boundary != BreakIterator.DONE;
+             boundary = lineIterator.next()) {
+            naturalBreaks[boundary] = true;
+        }
+
+        List<String> lines = new ArrayList<>();
+        int lineStart = 0;
+        while (lineStart < graphemes.size()) {
+            while (lineStart < graphemes.size() && graphemes.get(lineStart).whitespace()) {
+                lineStart++;
+            }
+            if (lineStart >= graphemes.size()) {
+                break;
+            }
+
+            int width = 0;
+            int cursor = lineStart;
+            int lastNaturalBreak = -1;
+            while (cursor < graphemes.size()) {
+                SubtitleGrapheme grapheme = graphemes.get(cursor);
+                if (cursor > lineStart && width + grapheme.displayWidth() > maxLineDisplayWidth) {
+                    break;
+                }
+                width += grapheme.displayWidth();
+                cursor++;
+                if (naturalBreaks[grapheme.end()]) {
+                    lastNaturalBreak = cursor;
+                }
+            }
+
+            if (cursor >= graphemes.size()) {
+                String remaining = paragraph.substring(graphemes.get(lineStart).start()).strip();
+                if (!remaining.isEmpty()) {
+                    lines.add(remaining);
+                }
+                break;
+            }
+
+            int breakAt = lastNaturalBreak > lineStart ? lastNaturalBreak : cursor;
+            if (breakAt <= lineStart) {
+                breakAt = lineStart + 1;
+            }
+            String line = paragraph.substring(
+                    graphemes.get(lineStart).start(),
+                    graphemes.get(breakAt - 1).end()
+            ).strip();
+            if (!line.isEmpty()) {
+                lines.add(line);
+            }
+            lineStart = breakAt;
+        }
+        return lines;
+    }
+
+    private static List<SubtitleGrapheme> subtitleGraphemes(String text) {
+        List<SubtitleGrapheme> graphemes = new ArrayList<>();
+        Matcher matcher = SUBTITLE_GRAPHEME_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String grapheme = matcher.group();
+            graphemes.add(new SubtitleGrapheme(
+                    matcher.start(),
+                    matcher.end(),
+                    subtitleGraphemeDisplayWidth(grapheme),
+                    grapheme.codePoints().allMatch(codePoint ->
+                            Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint))
+            ));
+        }
+        return graphemes;
+    }
+
+    private static int subtitleGraphemeDisplayWidth(String grapheme) {
+        boolean hasVisibleCodePoint = false;
+        for (int offset = 0; offset < grapheme.length();) {
+            int codePoint = grapheme.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            int type = Character.getType(codePoint);
+            if (type == Character.NON_SPACING_MARK
+                    || type == Character.COMBINING_SPACING_MARK
+                    || type == Character.ENCLOSING_MARK
+                    || type == Character.FORMAT) {
+                if (codePoint == 0xFE0F || codePoint == 0x20E3) {
+                    return 2;
+                }
+                continue;
+            }
+            hasVisibleCodePoint = true;
+            if (isWideSubtitleCodePoint(codePoint)) {
+                return 2;
+            }
+        }
+        return hasVisibleCodePoint ? 1 : 0;
+    }
+
+    private static boolean isWideSubtitleCodePoint(int codePoint) {
+        if ((codePoint >= 'A' && codePoint <= 'Z')
+                || codePoint == 'm'
+                || codePoint == 'w'
+                || codePoint == '@'
+                || codePoint == '%'
+                || codePoint == '&') {
+            return true;
+        }
+        Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
+        if (script == Character.UnicodeScript.BOPOMOFO
+                || script == Character.UnicodeScript.HAN
+                || script == Character.UnicodeScript.HANGUL
+                || script == Character.UnicodeScript.HIRAGANA
+                || script == Character.UnicodeScript.KATAKANA
+                || script == Character.UnicodeScript.YI) {
+            return true;
+        }
+        if ((codePoint >= 0x2E80 && codePoint <= 0x303F)
+                || (codePoint >= 0xFE10 && codePoint <= 0xFE6F)
+                || (codePoint >= 0xFF01 && codePoint <= 0xFF60)
+                || (codePoint >= 0xFFE0 && codePoint <= 0xFFE6)
+                || (codePoint >= 0x1F000 && codePoint <= 0x1FAFF)
+                || (codePoint >= 0x2600 && codePoint <= 0x27BF)) {
+            return true;
+        }
+        int type = Character.getType(codePoint);
+        return codePoint > 0x7F && (type == Character.DASH_PUNCTUATION
+                || type == Character.START_PUNCTUATION
+                || type == Character.END_PUNCTUATION
+                || type == Character.OTHER_PUNCTUATION
+                || type == Character.MATH_SYMBOL
+                || type == Character.OTHER_SYMBOL);
     }
 
     private double resolveClipDurationSeconds(StoryboardItem item) {
@@ -796,6 +991,76 @@ public class VideoComposeService {
         }
     }
 
+    private VideoDimensions probeVideoDimensions(Path file) {
+        List<String> cmd = List.of(
+                getFfprobeExecutable(), "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=s=x:p=0",
+                file.toString()
+        );
+        try {
+            Process process = new ProcessBuilder(cmd)
+                    .redirectErrorStream(true)
+                    .start();
+            boolean done = process.waitFor(15, TimeUnit.SECONDS);
+            if (!done) {
+                process.destroyForcibly();
+                log.warn("[VideoCompose] ffprobe 检测视频尺寸超时，使用默认字幕画布: {}", file);
+                return DEFAULT_VIDEO_DIMENSIONS;
+            }
+            String output;
+            try (InputStream in = process.getInputStream()) {
+                output = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            VideoDimensions dimensions = process.exitValue() == 0
+                    ? parseVideoDimensions(output)
+                    : null;
+            if (dimensions == null) {
+                log.warn("[VideoCompose] ffprobe 未返回有效视频尺寸，使用默认字幕画布: {}", file);
+                return DEFAULT_VIDEO_DIMENSIONS;
+            }
+            return dimensions;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[VideoCompose] ffprobe 检测视频尺寸被中断，使用默认字幕画布: {}", file, e);
+            return DEFAULT_VIDEO_DIMENSIONS;
+        } catch (IOException e) {
+            IOException wrapped = wrapExecutableStartException(
+                    e,
+                    "ffprobe",
+                    "video.compose.ffprobe-path",
+                    getFfprobeExecutable()
+            );
+            log.warn("[VideoCompose] ffprobe 不可用或尺寸检测失败，使用默认字幕画布: {}", file, wrapped);
+            return DEFAULT_VIDEO_DIMENSIONS;
+        }
+    }
+
+    static VideoDimensions parseVideoDimensions(String output) {
+        if (!StringUtils.hasText(output)) {
+            return null;
+        }
+        String line = output.strip().lines()
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse("")
+                .trim();
+        String[] parts = line.split("[xX]", 2);
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            VideoDimensions dimensions = new VideoDimensions(
+                    Integer.parseInt(parts[0].trim()),
+                    Integer.parseInt(parts[1].trim())
+            );
+            return dimensions.isValid() ? dimensions : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     private boolean allFilesHaveAudio(List<Path> files) {
         for (Path file : files) {
             if (!hasAudioStream(file)) {
@@ -1105,7 +1370,7 @@ public class VideoComposeService {
         public static ComposeOptions defaults() {
             return new ComposeOptions(
                     true,
-                    false,
+                    true,
                     true,
                     DEFAULT_ORIGINAL_AUDIO_VOLUME,
                     null,
@@ -1170,5 +1435,24 @@ public class VideoComposeService {
     }
 
     private record SubtitleFiles(Path srtFile, Path assFile, boolean hasSubtitle) {
+    }
+
+    record VideoDimensions(int width, int height) {
+        boolean isValid() {
+            return width > 0 && height > 0
+                    && width <= MAX_PROBED_VIDEO_DIMENSION
+                    && height <= MAX_PROBED_VIDEO_DIMENSION;
+        }
+    }
+
+    record SubtitleLayout(int playResX,
+                          int playResY,
+                          int fontSize,
+                          int horizontalMargin,
+                          int verticalMargin,
+                          int maxLineDisplayWidth) {
+    }
+
+    private record SubtitleGrapheme(int start, int end, int displayWidth, boolean whitespace) {
     }
 }

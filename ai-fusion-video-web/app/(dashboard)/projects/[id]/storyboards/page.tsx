@@ -172,7 +172,7 @@ export default function StoryboardTabPage() {
   const [composeOptionsOpen, setComposeOptionsOpen] = useState(false);
   const [composeOptions, setComposeOptions] = useState<ComposeOptionsState>({
     generateSubtitleFiles: true,
-    burnSubtitles: false,
+    burnSubtitles: true,
     keepOriginalAudio: true,
     originalAudioVolume: 1,
     bgmUrl: "",

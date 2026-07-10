@@ -10,7 +10,7 @@ RUN set -eux; \
     sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list; \
   fi; \
   apt-get update -o Acquire::Retries=5; \
-  apt-get install -y --no-install-recommends ffmpeg curl; \
+  apt-get install -y --no-install-recommends ffmpeg curl fonts-noto-cjk; \
   rm -rf /var/lib/apt/lists/*
 
 COPY app.jar app.jar
