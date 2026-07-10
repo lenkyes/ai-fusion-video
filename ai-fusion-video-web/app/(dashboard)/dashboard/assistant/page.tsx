@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
   Bot,
+  Check,
   CheckCircle2,
+  Copy,
   Loader2,
   MessageSquare,
   Plus,
@@ -14,6 +16,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AgentPipelineTimeline } from "@/components/dashboard/agent-pipeline/timeline";
 import {
   createInitialPipelineState,
@@ -43,6 +46,75 @@ type AssistantStatus = "idle" | "running" | "done" | "error" | "cancelled";
 interface HistoryTurn {
   user?: AgentMessage;
   assistantMessages: AgentMessage[];
+}
+
+async function copyToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through for browsers that expose the API but deny access.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error("Clipboard copy failed");
+  }
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      await copyToClipboard(text);
+      setCopied(true);
+      toast.success("问答已复制");
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("复制失败，请重试");
+    }
+  };
+
+  const label = copied ? "问答已复制" : "复制问答";
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      onClick={handleCopy}
+      disabled={!text.trim()}
+      aria-label={label}
+      title={label}
+      className="shrink-0 text-muted-foreground hover:text-foreground"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </Button>
+  );
 }
 
 const suggestedPrompts = [
@@ -387,6 +459,18 @@ export default function DashboardAssistantPage() {
 
   const renderHistoryTurn = (turn: HistoryTurn, index: number) => {
     const timeline = messagesToTimeline(turn.assistantMessages);
+    const answerText = timeline
+      .filter((item) => item.type === "content")
+      .map((item) => item.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const questionText = turn.user?.content?.trim();
+    const qaText = [
+      questionText && `问题：${questionText}`,
+      answerText && `回答：${answerText}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     return (
       <div key={`turn-${index}`} className="space-y-3">
         {turn.user?.content && (
@@ -397,6 +481,11 @@ export default function DashboardAssistantPage() {
         {timeline.length > 0 && (
           <div className="max-w-[92%] rounded-lg border border-border/30 bg-card/45 p-3">
             <AgentPipelineTimeline timeline={timeline} isActive={false} />
+            {answerText && (
+              <div className="mt-2 flex justify-end border-t border-border/20 pt-2">
+                <CopyButton text={qaText} />
+              </div>
+            )}
           </div>
         )}
       </div>
