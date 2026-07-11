@@ -465,17 +465,12 @@ export default function DashboardAssistantPage() {
       .filter(Boolean)
       .join("\n\n");
     const questionText = turn.user?.content?.trim();
-    const qaText = [
-      questionText && `问题：${questionText}`,
-      answerText && `回答：${answerText}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
     return (
       <div key={`turn-${index}`} className="space-y-3">
         {turn.user?.content && (
-          <div className="ml-auto max-w-[82%] rounded-lg bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground">
-            {turn.user.content}
+          <div className="ml-auto flex max-w-[82%] items-start gap-2 rounded-lg bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground">
+            <div className="min-w-0 flex-1 whitespace-pre-wrap">{turn.user.content}</div>
+            <CopyButton text={questionText ?? ""} />
           </div>
         )}
         {timeline.length > 0 && (
@@ -483,7 +478,7 @@ export default function DashboardAssistantPage() {
             <AgentPipelineTimeline timeline={timeline} isActive={false} />
             {answerText && (
               <div className="mt-2 flex justify-end border-t border-border/20 pt-2">
-                <CopyButton text={qaText} />
+                <CopyButton text={answerText} />
               </div>
             )}
           </div>
