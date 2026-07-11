@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -27,8 +30,16 @@ import java.util.Set;
 public class FileUploadController {
 
     private static final long MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+    private static final long MAX_AUDIO_FILE_SIZE = 200L * 1024 * 1024;
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of(
             "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"
+    );
+    private static final Set<String> ALLOWED_AUDIO_EXTENSIONS = Set.of(
+            "mp3", "wav", "m4a", "aac", "ogg", "flac"
+    );
+    private static final Set<String> ALLOWED_AUDIO_TYPES = Set.of(
+            "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4",
+            "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac", "application/ogg"
     );
 
     private final MediaStorageService mediaStorageService;
@@ -59,6 +70,44 @@ public class FileUploadController {
         } catch (IOException e) {
             log.error("[FileUpload] 上传失败", e);
             throw new BusinessException("上传失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/upload-audio")
+    @Operation(summary = "上传剪辑背景音乐")
+    public CommonResult<String> uploadAudio(@RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("音频文件不能为空");
+        }
+        if (file.getSize() > MAX_AUDIO_FILE_SIZE) {
+            throw new BusinessException("音频文件大小不能超过 200MB");
+        }
+        String extension = getExtension(file.getOriginalFilename()).toLowerCase(Locale.ROOT);
+        String contentType = file.getContentType() != null
+                ? file.getContentType().toLowerCase(Locale.ROOT) : "";
+        if (!ALLOWED_AUDIO_EXTENSIONS.contains(extension)
+                || (!contentType.isBlank() && !ALLOWED_AUDIO_TYPES.contains(contentType))) {
+            throw new BusinessException("仅支持 MP3、WAV、M4A、AAC、OGG、FLAC 音频");
+        }
+
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("bgm_upload_", "." + extension);
+            file.transferTo(tempFile);
+            String url = mediaStorageService.storeFile(tempFile, "audio/bgm", extension);
+            log.info("[FileUpload] BGM 上传成功: size={}KB, url={}", file.getSize() / 1024, url);
+            return CommonResult.success(url);
+        } catch (IOException e) {
+            log.error("[FileUpload] BGM 上传失败", e);
+            throw new BusinessException("音频上传失败: " + e.getMessage());
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.warn("[FileUpload] 临时音频清理失败: {}", tempFile, e);
+                }
+            }
         }
     }
 

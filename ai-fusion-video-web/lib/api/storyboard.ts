@@ -178,6 +178,11 @@ export interface ComposeEpisodeVideoReq {
   originalAudioVolume?: number;
   bgmUrl?: string;
   bgmVolume?: number;
+  clips?: Array<{
+    itemId: number;
+    sourceStart: number;
+    duration: number;
+  }>;
 }
 
 /** Create storyboard scene request */

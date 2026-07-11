@@ -115,3 +115,32 @@ export async function uploadFile(
   }
   return result.data;
 }
+
+export async function uploadAudio(
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const stored = localStorage.getItem("auth-storage");
+      return stored ? JSON.parse(stored)?.state?.token : null;
+    } catch {
+      return null;
+    }
+  })();
+  const resp = await axios.post(`${API_BASE_URL}/api/storage/upload-audio`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    timeout: 10 * 60 * 1000,
+    onUploadProgress: (event) => {
+      if (event.total && onProgress) onProgress(Math.round(event.loaded * 100 / event.total));
+    },
+  });
+  if (resp.data.code !== 0) throw new Error(resp.data.msg || "音频上传失败");
+  return resp.data.data;
+}

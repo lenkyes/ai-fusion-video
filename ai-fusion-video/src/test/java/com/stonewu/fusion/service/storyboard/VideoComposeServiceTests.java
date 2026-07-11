@@ -162,6 +162,36 @@ class VideoComposeServiceTests {
     }
 
     @Test
+    void submitEditedComposeAcceptsOrderedTrimmedClips() {
+        when(episodeMapper.selectById(11L)).thenReturn(StoryboardEpisode.builder().id(11L).storyboardId(21L).build());
+        when(storyboardService.getById(21L)).thenReturn(Storyboard.builder().id(21L).projectId(31L).build());
+        when(storyboardService.listScenesByEpisode(11L)).thenReturn(List.of(
+                StoryboardScene.builder().id(101L).sortOrder(0).build()));
+        when(storyboardService.listItemsByScene(101L)).thenReturn(List.of(
+                StoryboardItem.builder().id(201L).sortOrder(0).duration(BigDecimal.valueOf(5))
+                        .videoUrl("/media/videos/a.mp4").build(),
+                StoryboardItem.builder().id(202L).sortOrder(1).duration(BigDecimal.valueOf(6))
+                        .videoUrl("/media/videos/b.mp4").build()));
+        when(taskStreamService.createTask(eq(99L), eq(31L), eq("storyboard_episode_compose"),
+                any(String.class), eq("storyboard_episode"), eq(11L), any(String.class))).thenReturn("task-edit");
+        when(episodeMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
+
+        ComposeEpisodeVideoReqVO.EditorClip second = new ComposeEpisodeVideoReqVO.EditorClip();
+        second.setItemId(202L);
+        second.setSourceStart(1.25);
+        second.setDuration(2.5);
+        ComposeEpisodeVideoReqVO.EditorClip first = new ComposeEpisodeVideoReqVO.EditorClip();
+        first.setItemId(201L);
+        first.setDuration(4.0);
+
+        String taskId = videoComposeService.submitEditedCompose(11L, 99L,
+                VideoComposeService.ComposeOptions.defaults(), List.of(second, first));
+
+        assertThat(taskId).isEqualTo("task-edit");
+        verify(videoComposeExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
     void subtitleLayoutFollowsPortraitVideoDimensions() {
         VideoComposeService.VideoDimensions dimensions = VideoComposeService.parseVideoDimensions("720x1280\n");
         VideoComposeService.SubtitleLayout layout = VideoComposeService.resolveSubtitleLayout(dimensions);
