@@ -28,10 +28,12 @@ public class TokenService {
 
     private static final String ACCESS_TOKEN_PREFIX = "fusion:token:";
     private static final String REFRESH_TOKEN_PREFIX = "fusion:refresh_token:";
+    private static final String REFRESH_REPLAY_PREFIX = "fusion:refresh_replay:";
     private static final String ACCESS_TOKEN_REFRESH_SUFFIX = ":refresh";
     private static final String REFRESH_TOKEN_ACCESS_SUFFIX = ":access";
 
     private static final Duration TOKEN_EXPIRE_DURATION = Duration.ofHours(24);
+    private static final Duration REFRESH_REPLAY_DURATION = Duration.ofSeconds(30);
     private static final long TOKEN_EXPIRE_SECONDS = TOKEN_EXPIRE_DURATION.toSeconds();
 
     private final StringRedisTemplate redisTemplate;
@@ -47,6 +49,7 @@ public class TokenService {
     }
 
     @Data
+    @NoArgsConstructor
     @AllArgsConstructor
     public static class TokenPair {
         private String accessToken;
@@ -62,10 +65,10 @@ public class TokenService {
         return new TokenPair(accessToken, refreshToken, TOKEN_EXPIRE_SECONDS);
     }
 
-    public TokenPair refreshAccessToken(String refreshToken) {
+    public synchronized TokenPair refreshAccessToken(String refreshToken) {
         TokenSession session = getRefreshTokenSession(refreshToken);
         if (session == null) {
-            return null;
+            return getRefreshReplay(refreshToken);
         }
 
         String oldAccessToken = redisTemplate.opsForValue()
@@ -82,8 +85,9 @@ public class TokenService {
         String newRefreshToken = generateUUID();
         writeTokenPair(newAccessToken, newRefreshToken,
                 new TokenSession(session.getUserId(), session.getUsername(), session.getCurrentTeamId()));
-
-        return new TokenPair(newAccessToken, newRefreshToken, TOKEN_EXPIRE_SECONDS);
+        TokenPair tokenPair = new TokenPair(newAccessToken, newRefreshToken, TOKEN_EXPIRE_SECONDS);
+        writeRefreshReplay(refreshToken, tokenPair);
+        return tokenPair;
     }
 
     public Long getUserIdFromToken(String token) {
@@ -162,6 +166,28 @@ public class TokenService {
 
     private TokenSession getRefreshTokenSession(String refreshToken) {
         return deserializeSession(redisTemplate.opsForValue().get(REFRESH_TOKEN_PREFIX + refreshToken));
+    }
+
+    private void writeRefreshReplay(String refreshToken, TokenPair tokenPair) {
+        try {
+            redisTemplate.opsForValue().set(REFRESH_REPLAY_PREFIX + refreshToken,
+                    objectMapper.writeValueAsString(tokenPair), REFRESH_REPLAY_DURATION);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize refresh replay", e);
+        }
+    }
+
+    private TokenPair getRefreshReplay(String refreshToken) {
+        String rawValue = redisTemplate.opsForValue().get(REFRESH_REPLAY_PREFIX + refreshToken);
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(rawValue, TokenPair.class);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to deserialize refresh replay", e);
+            return null;
+        }
     }
 
     private String serializeSession(TokenSession session) {

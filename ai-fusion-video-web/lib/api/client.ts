@@ -1,5 +1,10 @@
 import axios from "axios";
-import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
+import {
+  clearStoredAuth,
+  isTerminalAuthError,
+  readStoredAuth,
+  refreshAuthTokens,
+} from "@/lib/auth-session";
 import type { CommonResult } from "./types";
 
 // 后端基础地址（可通过环境变量 NEXT_PUBLIC_API_BASE_URL 覆盖）
@@ -23,42 +28,15 @@ const http = axios.create({
  * 从 localStorage 读取 auth-storage（zustand persist）
  */
 function getAuthStorage() {
-  if (typeof window === "undefined") return null;
-  try {
-    const stored = localStorage.getItem("auth-storage");
-    if (stored) return JSON.parse(stored);
-  } catch {
-    // 忽略
-  }
-  return null;
+  return readStoredAuth();
 }
 
 /**
  * 更新 localStorage 中的 token
  */
-function updateAuthStorage(accessToken: string, refreshToken: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const stored = localStorage.getItem("auth-storage");
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      parsed.state.token = accessToken;
-      parsed.state.refreshToken = refreshToken;
-      localStorage.setItem("auth-storage", JSON.stringify(parsed));
-    }
-  } catch {
-    // 忽略
-  }
-}
-
-/**
- * 清除认证状态并跳转登录页
- */
 function handleAuthFailure() {
   if (typeof window === "undefined") return;
-  localStorage.removeItem("auth-storage");
-  // 清除 auth-token cookie
-  clearAuthCookie();
+  clearStoredAuth();
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -177,27 +155,8 @@ http.interceptors.response.use(
 
     try {
       // 调用刷新接口（直接用 axios 避免走拦截器死循环）
-      const refreshResp = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {
-        refreshToken: storedRefreshToken,
-      });
-
-      const result = refreshResp.data as CommonResult<{
-        accessToken: string;
-        refreshToken: string;
-        expiresIn?: number;
-      }>;
-
-      if (result.code !== 0 || !result.data) {
-        throw new Error(result.msg || "刷新令牌失败");
-      }
-
-      const { accessToken, refreshToken } = result.data;
-
-      // 更新 localStorage
-      updateAuthStorage(accessToken, refreshToken);
-
-      // 同步更新 cookie（供 Next.js middleware 路由守卫使用）
-      setAuthCookie(accessToken, result.data.expiresIn);
+      const result = await refreshAuthTokens();
+      const { accessToken, refreshToken } = result;
 
       // 尝试更新 zustand store（如果已初始化）
       try {
@@ -219,8 +178,11 @@ http.interceptors.response.use(
     } catch (refreshError) {
       // 刷新失败 → 清除认证状态，跳登录页
       processQueue(refreshError as Error, null);
-      handleAuthFailure();
-      return Promise.reject(new Error("登录已过期，请重新登录"));
+      if (isTerminalAuthError(refreshError)) {
+        handleAuthFailure();
+        return Promise.reject(new Error("登录已过期，请重新登录"));
+      }
+      return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;
     }

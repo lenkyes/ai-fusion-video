@@ -1,5 +1,9 @@
-import { http, API_BASE_URL } from "./client";
-import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
+import { http } from "./client";
+import {
+  clearStoredAuth,
+  isTerminalAuthError,
+  refreshAuthTokens,
+} from "@/lib/auth-session";
 
 // ========== 类型定义 ==========
 
@@ -86,88 +90,15 @@ function getToken(): string | null {
 }
 
 // ---- SSE 刷新令牌队列机制（与 client.ts 对齐） ----
-let isRefreshingForSSE = false;
-let sseRefreshQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (err: Error) => void;
-}> = [];
-
-function processSseQueue(error: Error | null, token: string | null) {
-  sseRefreshQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token!);
-    }
-  });
-  sseRefreshQueue = [];
-}
-
 /**
  * 尝试刷新 token（带队列，避免并发刷新）
  * 仅供 SSE 流式 fetch 使用
  */
-async function refreshTokenForSSE(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
-
-  // 如果正在刷新中，排队等待
-  if (isRefreshingForSSE) {
-    return new Promise<string>((resolve, reject) => {
-      sseRefreshQueue.push({ resolve, reject });
-    });
-  }
-
-  try {
-    const stored = localStorage.getItem("auth-storage");
-    if (!stored) return null;
-    const parsed = JSON.parse(stored);
-    const refreshToken = parsed?.state?.refreshToken;
-    if (!refreshToken) return null;
-
-    isRefreshingForSSE = true;
-
-    const resp = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!resp.ok) {
-      processSseQueue(new Error("刷新失败"), null);
-      return null;
-    }
-
-    const result = await resp.json();
-    if (result.code !== 0 || !result.data) {
-      processSseQueue(new Error("刷新失败"), null);
-      return null;
-    }
-
-    const { accessToken, refreshToken: newRefresh } = result.data;
-
-    // 更新 localStorage
-    parsed.state.token = accessToken;
-    parsed.state.refreshToken = newRefresh;
-    localStorage.setItem("auth-storage", JSON.stringify(parsed));
-
-    // 同步 cookie
-    setAuthCookie(accessToken, result.data.expiresIn);
-
-    // 尝试更新 zustand store
-    try {
-      const { useAuthStore } = await import("@/lib/store/auth-store");
-      useAuthStore.getState().setTokens(accessToken, newRefresh);
-    } catch {
-      // store 可能未初始化
-    }
-
-    processSseQueue(null, accessToken);
-    return accessToken;
-  } catch {
-    processSseQueue(new Error("刷新失败"), null);
-    return null;
-  } finally {
-    isRefreshingForSSE = false;
-  }
+async function refreshTokenForSSE(): Promise<string> {
+  const result = await refreshAuthTokens();
+  const { useAuthStore } = await import("@/lib/store/auth-store");
+  useAuthStore.getState().setTokens(result.accessToken, result.refreshToken);
+  return result.accessToken;
 }
 
 /**
@@ -187,17 +118,16 @@ export async function authenticatedFetch(
   const response = await fetch(input, { ...init, headers });
 
   if (response.status === 401) {
-    const newToken = await refreshTokenForSSE();
-    if (newToken) {
+    try {
+      const newToken = await refreshTokenForSSE();
       headers.set("Authorization", `Bearer ${newToken}`);
       return fetch(input, { ...init, headers });
-    }
-    // 刷新失败 → 清除状态跳转登录页
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("auth-storage");
-      clearAuthCookie();
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
+    } catch (error) {
+      if (isTerminalAuthError(error) && typeof window !== "undefined") {
+        clearStoredAuth();
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login";
+        }
       }
     }
   }

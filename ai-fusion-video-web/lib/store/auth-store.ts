@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import * as authApi from "@/lib/api/auth";
 import { clearAuthCookie, setAuthCookie } from "@/lib/auth-cookie";
 import type { UserRespVO } from "@/lib/api/types";
+import { isTerminalAuthError, refreshAuthTokens } from "@/lib/auth-session";
 
 // 认证状态类型
 interface AuthState {
@@ -72,17 +73,17 @@ export const useAuthStore = create<AuthState>()(
 
       // 刷新当前会话，用于重新打开站点时续 24 小时有效期
       refreshSession: async () => {
-        const currentRefreshToken = get().refreshToken;
-        if (!currentRefreshToken) {
+        if (!get().refreshToken) {
           return false;
         }
         try {
-          const resp = await authApi.refreshToken(currentRefreshToken);
-          setAuthCookie(resp.accessToken, resp.expiresIn);
+          const resp = await refreshAuthTokens();
           set({ token: resp.accessToken, refreshToken: resp.refreshToken });
           return true;
-        } catch {
-          get().clearAuth();
+        } catch (error) {
+          if (isTerminalAuthError(error)) {
+            get().clearAuth();
+          }
           return false;
         }
       },
@@ -115,3 +116,27 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== "auth-storage") return;
+    if (!event.newValue) {
+      useAuthStore.setState({ token: null, refreshToken: null, user: null });
+      clearAuthCookie();
+      return;
+    }
+    try {
+      const state = JSON.parse(event.newValue)?.state;
+      if (state?.token && state?.refreshToken) {
+        useAuthStore.setState({
+          token: state.token,
+          refreshToken: state.refreshToken,
+          user: state.user ?? useAuthStore.getState().user,
+        });
+        setAuthCookie(state.token);
+      }
+    } catch {
+      // Ignore malformed storage events.
+    }
+  });
+}

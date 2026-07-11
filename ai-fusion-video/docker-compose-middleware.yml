@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     ports:
       - "46379:6379"
-    command: redis-server --requirepass 123456
+    command: redis-server --appendonly yes --requirepass 123456
     volumes:
       - redis_data:/data
 

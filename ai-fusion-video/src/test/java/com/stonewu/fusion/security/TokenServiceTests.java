@@ -75,4 +75,17 @@ class TokenServiceTests {
         assertNotNull(tokenService.getAccessTokenSession(second.getAccessToken()));
         assertNull(redisValues.get(ACCESS_TOKEN_PREFIX + first.getAccessToken()));
     }
+
+    @Test
+    void repeatedRefreshShouldReturnSameRotatedPairWithinGracePeriod() {
+        TokenService.TokenPair original = tokenService.createToken(1L, "stone", 10L);
+
+        TokenService.TokenPair firstRefresh = tokenService.refreshAccessToken(original.getRefreshToken());
+        TokenService.TokenPair repeatedRefresh = tokenService.refreshAccessToken(original.getRefreshToken());
+
+        assertNotNull(repeatedRefresh);
+        assertEquals(firstRefresh.getAccessToken(), repeatedRefresh.getAccessToken());
+        assertEquals(firstRefresh.getRefreshToken(), repeatedRefresh.getRefreshToken());
+        assertNotNull(tokenService.getAccessTokenSession(repeatedRefresh.getAccessToken()));
+    }
 }
