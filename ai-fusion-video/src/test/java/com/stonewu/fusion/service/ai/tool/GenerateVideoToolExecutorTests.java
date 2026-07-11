@@ -631,4 +631,63 @@ class GenerateVideoToolExecutorTests {
         assertThat(task.getGenerateMode()).isEqualTo("image2video");
         assertThat(result).contains("\"status\":\"success\"");
     }
+
+    @Test
+    void shouldUsePreviousShotTailFrameAndVideoAndPersistCurrentTailFrame() throws Exception {
+        AiModelService aiModelService = mock(AiModelService.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+        StoryboardService storyboardService = mock(StoryboardService.class);
+
+        AiModel model = AiModel.builder().id(31L).code("seedance-2").build();
+        StoryboardItem previous = StoryboardItem.builder()
+                .id(3309L)
+                .storyboardId(220L)
+                .generatedVideoUrl("/media/videos/previous.mp4")
+                .customData("{\"lastFrameImageUrl\":\"/media/images/previous-tail.png\"}")
+                .build();
+        StoryboardItem current = StoryboardItem.builder()
+                .id(3310L)
+                .storyboardId(220L)
+                .generatedImageUrl("/media/images/current.png")
+                .build();
+        when(aiModelService.getDefaultByType(3)).thenReturn(model);
+        when(strategyRouter.supports(model)).thenReturn(true);
+        when(capabilityService.resolveVideoCapability(model)).thenReturn(
+                new GenerationModelCapabilityService.VideoModelCapability(
+                        true, true, true, true, false, 0, null, 9, 1, 0));
+        when(storyboardService.getItemById(3310L)).thenReturn(current);
+        when(storyboardService.listItems(220L)).thenReturn(List.of(previous, current));
+        when(systemConfigService.resolvePublicUrl("/media/images/previous-tail.png"))
+                .thenReturn("https://fusion.test/media/images/previous-tail.png");
+        when(systemConfigService.resolvePublicUrl("/media/videos/previous.mp4"))
+                .thenReturn("https://fusion.test/media/videos/previous.mp4");
+
+        VideoTask completed = VideoTask.builder().id(102L).status(2).build();
+        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completed);
+        when(videoGenerationService.listItems(102L)).thenReturn(List.of(VideoItem.builder()
+                .videoUrl("https://fusion.test/media/videos/current.mp4")
+                .lastFrameUrl("https://fusion.test/media/images/current-tail.png")
+                .build()));
+
+        GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
+                aiModelService, videoGenerationService, videoGenerationConsumer,
+                capabilityService, strategyRouter, systemConfigService, storyboardService);
+
+        executor.execute("{\"prompt\":\"continue the shot\",\"storyboardItemId\":3310}",
+                ToolExecutionContext.builder().userId(7L).build());
+
+        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
+        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
+        assertThat(taskCaptor.getValue().getFirstFrameImageUrl())
+                .isEqualTo("https://fusion.test/media/images/previous-tail.png");
+        assertThat(taskCaptor.getValue().getReferenceVideoUrls())
+                .contains("https://fusion.test/media/videos/previous.mp4");
+        assertThat(current.getGeneratedVideoUrl()).endsWith("current.mp4");
+        assertThat(current.getCustomData()).contains("current-tail.png");
+        verify(storyboardService).updateItem(current);
+    }
 }

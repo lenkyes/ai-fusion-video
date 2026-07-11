@@ -223,12 +223,20 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             String firstFrameImageUrl = params.getStr("firstFrameImageUrl");
             String lastFrameImageUrl = params.getStr("lastFrameImageUrl");
+            PreviousShotInputs previousShotInputs = PreviousShotInputs.EMPTY;
             if (storyboardItemId != null) {
                 StoryboardFrameInputs frameInputs = resolveStoryboardFrameInputs(storyboardItemId);
-                if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)
-                        && StrUtil.isNotBlank(frameInputs.firstFrameImageUrl())) {
-                    firstFrameImageUrl = frameInputs.firstFrameImageUrl();
-                    log.info("[generate_video] 自动使用分镜镜头首帧图: storyboardItemId={}", storyboardItemId);
+                previousShotInputs = resolvePreviousShotInputs(storyboardItemId);
+                if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)) {
+                    firstFrameImageUrl = firstNonBlank(
+                            previousShotInputs.lastFrameImageUrl(),
+                            frameInputs.firstFrameImageUrl());
+                    if (StrUtil.isNotBlank(previousShotInputs.lastFrameImageUrl())) {
+                        log.info("[generate_video] 自动使用上一镜头尾帧作为首帧: storyboardItemId={}, previousItemId={}",
+                                storyboardItemId, previousShotInputs.storyboardItemId());
+                    } else if (StrUtil.isNotBlank(firstFrameImageUrl)) {
+                        log.info("[generate_video] 自动使用分镜镜头首帧图: storyboardItemId={}", storyboardItemId);
+                    }
                 }
                 if (supportsLastFrame(capability) && StrUtil.isBlank(lastFrameImageUrl)
                         && StrUtil.isNotBlank(frameInputs.lastFrameImageUrl())) {
@@ -245,7 +253,15 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             String referenceImageUrls = toJsonOrNull(referenceImageUrlList);
 
             // 解析参考视频列表
-            String referenceVideoUrls = toJsonOrNull(collectMediaUrls(params, "referenceVideoUrls", false));
+            List<String> referenceVideoUrlList = new ArrayList<>();
+            if (capability == null || capability.supportsReferenceVideos()) {
+                addDistinct(referenceVideoUrlList,
+                        resolvePublicMediaUrl(previousShotInputs.videoUrl(), "previousShotVideoUrl"));
+            }
+            for (String url : collectMediaUrls(params, "referenceVideoUrls", false)) {
+                addDistinct(referenceVideoUrlList, url);
+            }
+            String referenceVideoUrls = toJsonOrNull(referenceVideoUrlList);
 
             // 解析参考音频列表
             String referenceAudioUrls = toJsonOrNull(collectMediaUrls(params, "referenceAudioUrls", false));
@@ -296,6 +312,8 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             if (videoItem == null) {
                 return errorResult("生成完成但未获取到视频 URL");
             }
+
+            persistStoryboardGenerationResult(storyboardItemId, videoItem);
 
             log.info("[generate_video] 生成成功: videoUrl={}, coverUrl={}",
                     videoItem.getVideoUrl(), videoItem.getCoverUrl());
@@ -389,6 +407,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 .set("status", "success")
                 .set("videoUrl", videoItem.getVideoUrl())
                 .set("coverUrl", videoItem.getCoverUrl())
+                .set("lastFrameUrl", videoItem.getLastFrameUrl())
                 .set("duration", videoItem.getDuration())
                 .set("prompt", prompt)
                 .toString();
@@ -565,6 +584,60 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         }
     }
 
+    private PreviousShotInputs resolvePreviousShotInputs(Long storyboardItemId) {
+        try {
+            StoryboardItem current = storyboardService.getItemById(storyboardItemId);
+            if (current == null || current.getStoryboardId() == null) {
+                return PreviousShotInputs.EMPTY;
+            }
+            List<StoryboardItem> items = storyboardService.listItems(current.getStoryboardId());
+            for (int i = 1; i < items.size(); i++) {
+                if (!Objects.equals(items.get(i).getId(), storyboardItemId)) {
+                    continue;
+                }
+                StoryboardItem previous = items.get(i - 1);
+                return new PreviousShotInputs(
+                        previous.getId(),
+                        extractLastFrameImageUrl(previous.getCustomData()),
+                        firstNonBlank(previous.getGeneratedVideoUrl(), previous.getVideoUrl()));
+            }
+        } catch (Exception e) {
+            log.warn("[generate_video] 读取上一分镜参考失败: storyboardItemId={}, reason={}",
+                    storyboardItemId, e.getMessage());
+        }
+        return PreviousShotInputs.EMPTY;
+    }
+
+    private void persistStoryboardGenerationResult(Long storyboardItemId, VideoItem videoItem) {
+        if (storyboardItemId == null || videoItem == null) {
+            return;
+        }
+        try {
+            StoryboardItem item = storyboardService.getItemById(storyboardItemId);
+            if (item == null) {
+                return;
+            }
+            item.setGeneratedVideoUrl(videoItem.getVideoUrl());
+            if (StrUtil.isNotBlank(videoItem.getLastFrameUrl())) {
+                JSONObject customData = StrUtil.isBlank(item.getCustomData())
+                        ? JSONUtil.createObj()
+                        : JSONUtil.parseObj(item.getCustomData());
+                customData.set("lastFrameImageUrl", videoItem.getLastFrameUrl());
+                item.setCustomData(customData.toString());
+            }
+            storyboardService.updateItem(item);
+        } catch (Exception e) {
+            log.warn("[generate_video] 保存分镜视频连续性信息失败: storyboardItemId={}, reason={}",
+                    storyboardItemId, e.getMessage());
+        }
+    }
+
+    private void addDistinct(List<String> urls, String url) {
+        if (StrUtil.isNotBlank(url) && !urls.contains(url)) {
+            urls.add(url);
+        }
+    }
+
     private String extractLastFrameImageUrl(String customData) {
         if (StrUtil.isBlank(customData)) {
             return null;
@@ -673,5 +746,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     private record StoryboardFrameInputs(String firstFrameImageUrl, String lastFrameImageUrl) {
         private static final StoryboardFrameInputs EMPTY = new StoryboardFrameInputs(null, null);
+    }
+
+    private record PreviousShotInputs(Long storyboardItemId, String lastFrameImageUrl, String videoUrl) {
+        private static final PreviousShotInputs EMPTY = new PreviousShotInputs(null, null, null);
     }
 }

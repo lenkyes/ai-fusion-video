@@ -505,7 +505,7 @@ public class AiAgentRegistry {
                                                                 .toolName("generate_storyboard_video")
                                                                 .displayName("为镜头生成视频")
                                                                 .description("""
-                                                                                为单个分镜镜头生成AI视频并自动保存。每次调用只处理一个镜头，可在同一轮同时调用多个实例并行执行。
+                                                                                为单个分镜镜头生成AI视频并自动保存。每次调用只处理一个镜头；批量生成时必须按分镜顺序串行调用，等待上一镜头完成后再处理下一镜头，以便复用上一镜头尾帧和参考视频。
                                                                                 主 Agent 必须先整理统一的 consistencyContext，并在每次调用中传给子 Agent；即使只生成一个镜头，也要基于项目资产和该镜头所在场次生成一致性上下文，确保角色、场景、道具保持一致。
 
                                                                                 调用时 message 必须包含以下信息（每行一个键值对）：
