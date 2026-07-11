@@ -165,6 +165,39 @@ public class VideoComposeService {
         return submitTarget(target, userId, collectEpisodeComposeClips(episodeId), options);
     }
 
+    public String submitEditedCompose(Long episodeId, Long userId, ComposeOptions options,
+                                      List<ComposeEpisodeVideoReqVO.EditorClip> requestedClips) {
+        if (requestedClips == null || requestedClips.isEmpty()) {
+            return submitCompose(episodeId, userId, options);
+        }
+        StoryboardEpisode episode = episodeMapper.selectById(episodeId);
+        if (episode == null) {
+            throw new BusinessException(404, "分镜集不存在: " + episodeId);
+        }
+        Storyboard storyboard = storyboardService.getById(episode.getStoryboardId());
+        if (storyboard == null) {
+            throw new BusinessException(404, "分镜不存在: " + episode.getStoryboardId());
+        }
+        List<ComposeClip> available = collectEpisodeComposeClips(episodeId);
+        List<ComposeClip> edited = new ArrayList<>();
+        for (ComposeEpisodeVideoReqVO.EditorClip requested : requestedClips) {
+            if (requested == null || requested.getItemId() == null) {
+                throw new BusinessException("剪辑片段缺少 itemId");
+            }
+            ComposeClip source = available.stream()
+                    .filter(clip -> requested.getItemId().equals(clip.item().getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException("剪辑片段不属于当前分集: " + requested.getItemId()));
+            double start = finitePositiveOrZero(requested.getSourceStart());
+            double duration = finiteDuration(requested.getDuration(), resolveClipDurationSeconds(source.item()));
+            edited.add(new ComposeClip(source.item(), source.videoUrl(), start, duration));
+        }
+        ComposeTarget target = new ComposeTarget(ComposeTargetType.EPISODE, episodeId, storyboard.getProjectId(),
+                episode.getStoryboardId(), episodeId, EPISODE_TASK_TYPE, EPISODE_TASK_CONTEXT_TYPE,
+                buildEpisodeTaskTitle(episode), "剪辑工程没有可合成的视频", "本集已在合成中，请稍候", "episode", "ep");
+        return submitTarget(target, userId, edited, options);
+    }
+
     public String submitSceneCompose(Long sceneId, Long userId) {
         return submitSceneCompose(sceneId, userId, ComposeOptions.defaults());
     }
@@ -252,7 +285,16 @@ public class VideoComposeService {
             List<Path> localFiles = new ArrayList<>();
             for (int i = 0; i < clips.size(); i++) {
                 Path local = workDir.resolve(String.format("v%04d.mp4", i));
-                downloadToFile(clips.get(i).videoUrl(), local);
+                ComposeClip clip = clips.get(i);
+                Path downloaded = workDir.resolve(String.format("source%04d.mp4", i));
+                downloadToFile(clip.videoUrl(), downloaded);
+                if (clip.requiresTrim()) {
+                    if (!runFfmpegTrim(downloaded, local, clip.sourceStart(), clip.duration())) {
+                        throw new RuntimeException("ffmpeg 裁剪片段失败: " + clip.item().getId());
+                    }
+                } else {
+                    Files.move(downloaded, local, StandardCopyOption.REPLACE_EXISTING);
+                }
                 localFiles.add(local);
             }
 
@@ -375,7 +417,7 @@ public class VideoComposeService {
                     ? item.getVideoUrl()
                     : item.getGeneratedVideoUrl();
             if (StringUtils.hasText(url)) {
-                clips.add(new ComposeClip(item, url));
+                clips.add(new ComposeClip(item, url, 0, resolveClipDurationSeconds(item)));
             }
         }
         return clips;
@@ -412,7 +454,7 @@ public class VideoComposeService {
         double cursorSeconds = 0;
         int subtitleIndex = 1;
         for (ComposeClip clip : clips) {
-            double durationSeconds = resolveClipDurationSeconds(clip.item());
+            double durationSeconds = clip.duration();
             String text = cleanDialogue(clip.item().getDialogue());
             if (StringUtils.hasText(text)) {
                 String wrappedText = wrapSubtitleText(text, layout.maxLineDisplayWidth());
@@ -733,6 +775,23 @@ public class VideoComposeService {
         cmd.add("yuv420p");
         cmd.add(output.toString());
         return runFfmpeg(cmd, "filter-complex", 30);
+    }
+
+    private boolean runFfmpegTrim(Path input, Path output, double sourceStart, double duration) throws Exception {
+        List<String> cmd = List.of(getFfmpegExecutable(), "-y", "-ss", ffmpegNumber(sourceStart),
+                "-i", input.toString(), "-t", ffmpegNumber(duration), "-map", "0:v:0", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-movflags", "+faststart", output.toString());
+        return runFfmpeg(cmd, "trim", 15);
+    }
+
+    private static double finitePositiveOrZero(Double value) {
+        return value != null && Double.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    private static double finiteDuration(Double value, double fallback) {
+        if (value == null || !Double.isFinite(value) || value <= 0) return fallback;
+        return Math.min(value, 6 * 60 * 60);
     }
 
     private boolean runFfmpegPostProcess(Path input, Path assFile, Path bgmFile, Path output,
@@ -1431,7 +1490,15 @@ public class VideoComposeService {
                                  String workDirPrefix) {
     }
 
-    private record ComposeClip(StoryboardItem item, String videoUrl) {
+    private record ComposeClip(StoryboardItem item, String videoUrl, double sourceStart, double duration) {
+        boolean requiresTrim() {
+            return sourceStart > 0.0001 || Math.abs(duration - resolveItemDuration(item)) > 0.0001;
+        }
+
+        private static double resolveItemDuration(StoryboardItem item) {
+            BigDecimal value = item != null ? item.getDuration() : null;
+            return value != null && value.compareTo(BigDecimal.ZERO) > 0 ? value.doubleValue() : DEFAULT_CLIP_DURATION_SECONDS;
+        }
     }
 
     private record SubtitleFiles(Path srtFile, Path assFile, boolean hasSubtitle) {

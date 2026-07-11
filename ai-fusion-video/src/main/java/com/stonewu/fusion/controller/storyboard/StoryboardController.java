@@ -129,8 +129,8 @@ public class StoryboardController {
     public CommonResult<String> composeEpisodeVideo(@PathVariable Long id,
                                                     @RequestBody(required = false) ComposeEpisodeVideoReqVO reqVO) {
         Long userId = requireCurrentUserId();
-        return CommonResult.success(videoComposeService.submitCompose(id, userId,
-                VideoComposeService.ComposeOptions.from(reqVO)));
+        return CommonResult.success(videoComposeService.submitEditedCompose(id, userId,
+                VideoComposeService.ComposeOptions.from(reqVO), reqVO != null ? reqVO.getClips() : null));
     }
 
     // ========== 分镜场次 ==========

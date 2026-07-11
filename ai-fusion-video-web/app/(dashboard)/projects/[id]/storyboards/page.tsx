@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, type MouseEvent } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 import {
   Film,
@@ -21,6 +22,7 @@ import {
   Volume2,
   Music,
   FileText,
+  Scissors,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
@@ -1041,6 +1043,16 @@ export default function StoryboardTabPage() {
             </h2>
           </div>
           <div className="flex items-center gap-2">
+            {currentEpisodeId && (
+              <Link
+                href={`/projects/${projectId}/editor?episodeId=${currentEpisodeId}`}
+                className="hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/40 bg-muted/20 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/50"
+                title="进入在线剪辑"
+              >
+                <Scissors className="h-3.5 w-3.5" />
+                在线剪辑
+              </Link>
+            )}
             {currentEpisodeId && currentEpisode && (() => {
               const isBusy =
                 submittingComposeEpisodeIds.includes(currentEpisodeId) ||
