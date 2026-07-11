@@ -19,7 +19,7 @@ import com.stonewu.fusion.service.ai.AiStreamRedisService;
 import com.stonewu.fusion.service.ai.AiToolConfigService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
-import com.stonewu.fusion.service.ai.VideoTemplateContext;
+import com.stonewu.fusion.service.ai.StoryboardDurationContext;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -834,7 +834,7 @@ public class AgentScopeAssistantService {
 
         if (template.contains("{storyboardDurationRule}")) {
             template = template.replace("{storyboardDurationRule}",
-                    VideoTemplateContext.buildStoryboardRule(reqVO.getContext()));
+                    StoryboardDurationContext.buildPromptRule(reqVO.getContext()));
         }
 
         if (CollUtil.isNotEmpty(reqVO.getAutoReferences())) {

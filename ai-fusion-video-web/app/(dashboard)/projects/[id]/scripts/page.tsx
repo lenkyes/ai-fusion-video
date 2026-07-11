@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Loader2, Menu, Info } from "lucide-react";
+import { Loader2, Menu, Info, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
@@ -20,6 +20,9 @@ import { ParseScriptDialog } from "@/components/dashboard/parse-script-dialog";
 import { EpisodeParseDialog } from "@/components/dashboard/episode-parse-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 import { useProject } from "../project-context";
+import { buildRandomTemplateStoryPrompt, getVideoTemplate } from "@/lib/video-templates";
+import type { VideoTemplate } from "@/lib/video-templates";
+import { Button } from "@/components/ui/button";
 
 export default function ScriptTabPage() {
   const params = useParams();
@@ -27,6 +30,7 @@ export default function ScriptTabPage() {
   const { project } = useProject();
 
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
   const [script, setScript] = useState<Script | null>(null);
   const [episodes, setEpisodes] = useState<ScriptEpisode[]>([]);
 
@@ -217,6 +221,26 @@ export default function ScriptTabPage() {
     },
     [addPipeline, loadScript, project?.name, projectId, setExpandedTaskId, setPanelExpanded]
   );
+
+  const templateId = typeof project?.properties?.videoTemplateId === "string"
+    ? project.properties.videoTemplateId : "";
+  const projectTemplate = (project?.properties?.videoTemplateSnapshot as VideoTemplate | undefined)
+    || getVideoTemplate(templateId);
+
+  const regenerateTemplateStory = async () => {
+    if (!projectTemplate || !script || regenerating) return;
+    if (!confirm("将删除当前剧本及其分集、场次并随机生成一个全新故事，是否继续？")) return;
+    setRegenerating(true);
+    try {
+      await scriptApi.delete(script.id);
+      const created = await scriptApi.create({ projectId, title: project?.name || projectTemplate.name, rawContent: buildRandomTemplateStoryPrompt(projectTemplate) });
+      setScript(created); setEpisodes([]); setEpisodeScenes({});
+      const pipelineId = addPipeline({ label: `换一个故事 - ${projectTemplate.name}`, projectId,
+        request: { agentType: "story_to_script", category: "pipeline", title: `随机生成：${projectTemplate.name}`, projectId, context: { scriptId: created.id, templateId: projectTemplate.id } },
+        onComplete: loadScript });
+      setPanelExpanded(true); setExpandedTaskId(pipelineId);
+    } finally { setRegenerating(false); }
+  };
 
   // ========== 导航操作 ==========
 
@@ -563,8 +587,9 @@ export default function ScriptTabPage() {
       variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } } }}
       initial="hidden"
       animate="visible"
-      className="flex h-full rounded-xl border border-border/20 overflow-hidden bg-card/10"
+      className="relative flex h-full rounded-xl border border-border/20 overflow-hidden bg-card/10"
     >
+      {projectTemplate && <div className="absolute right-3 top-3 z-20"><Button size="sm" variant="outline" disabled={regenerating} onClick={regenerateTemplateStory}>{regenerating?<Loader2 className="animate-spin"/>:<RefreshCw/>}换一个故事</Button></div>}
       {/* 左栏：树形导航 */}
       <motion.div variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] } } }} className="shrink-0 hidden xl:block">
       <EpisodeTree

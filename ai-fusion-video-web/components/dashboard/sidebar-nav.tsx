@@ -15,6 +15,7 @@ import {
   Bot,
   HardDrive,
   ListChecks,
+  Clapperboard,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ export function SidebarNav({ onNavigate, project: projectProp }: { onNavigate?: 
         { key: "profile", label: "个人设置", icon: Users, href: "/settings/profile", iconColor: "text-blue-400" },
         { key: "ai-models", label: "AI 模型", icon: Bot, href: "/settings/ai-models", iconColor: "text-purple-400" },
         { key: "storage", label: "存储配置", icon: HardDrive, href: "/settings/storage", iconColor: "text-orange-400" },
+        { key: "video-templates", label: "视频模板", icon: Clapperboard, href: "/settings/video-templates", iconColor: "text-rose-400" },
       ]
     : [
         { key: "profile", label: "个人设置", icon: Users, href: "/settings/profile", iconColor: "text-blue-400" },

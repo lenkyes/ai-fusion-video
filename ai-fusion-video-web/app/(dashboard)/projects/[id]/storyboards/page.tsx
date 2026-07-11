@@ -308,8 +308,6 @@ export default function StoryboardTabPage() {
             storyboardId: newStoryboard.id,
             storyboardMode: options.storyboardMode,
             shotDuration: options.shotDuration,
-            templateId: options.templateId,
-            templatePrompt: options.templatePrompt,
           },
         },
         onComplete: () => {

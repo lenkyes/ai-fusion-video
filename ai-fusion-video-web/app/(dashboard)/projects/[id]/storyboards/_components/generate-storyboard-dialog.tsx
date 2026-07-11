@@ -21,15 +21,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { buildTemplateGenerationPrompt, getVideoTemplate, VIDEO_TEMPLATES } from "@/lib/video-templates";
 
 export type StoryboardGenerationMode = "regular" | "custom";
 
 export interface StoryboardGenerationOptions {
   storyboardMode: StoryboardGenerationMode;
   shotDuration: number;
-  templateId?: string;
-  templatePrompt?: string;
 }
 
 interface GenerateStoryboardDialogProps {
@@ -55,8 +52,6 @@ export function GenerateStoryboardDialog({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [templateId, setTemplateId] = useState("");
-  const [storySeed, setStorySeed] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -64,8 +59,6 @@ export function GenerateStoryboardDialog({
     setShotDuration(String(DEFAULT_SHOT_DURATION));
     setSubmitting(false);
     setError("");
-    setTemplateId("");
-    setStorySeed("");
   }, [open]);
 
   const handleClose = () => {
@@ -95,12 +88,9 @@ export function GenerateStoryboardDialog({
     setSubmitting(true);
     setError("");
     try {
-      const template = getVideoTemplate(templateId);
       await onConfirm({
         storyboardMode,
         shotDuration: resolvedDuration,
-        templateId: template?.id,
-        templatePrompt: template ? buildTemplateGenerationPrompt(template, storySeed) : undefined,
       });
       onClose();
     } catch (err) {
@@ -135,14 +125,6 @@ export function GenerateStoryboardDialog({
                 : "选择 AI 拆分镜头时采用的时长策略。"}
             </DialogDescription>
           </DialogHeader>
-          <div className="border-b border-border/30 px-6 py-4">
-            <Label className="mb-2 block">创作模板</Label>
-            <select className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" value={templateId} onChange={event => setTemplateId(event.target.value)}>
-              <option value="">不使用模板</option>
-              {VIDEO_TEMPLATES.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
-            </select>
-            {getVideoTemplate(templateId) && <div className="mt-3 space-y-2"><p className="text-xs text-muted-foreground">{getVideoTemplate(templateId)?.description}</p><textarea className="min-h-20 w-full resize-y rounded-lg border border-border bg-background p-3 text-sm outline-none focus:border-primary" value={storySeed} onChange={event => setStorySeed(event.target.value)} placeholder="输入本次故事主题，例如：多年后回到外婆住过的老房子" required /></div>}
-          </div>
 
           <div className="space-y-5 px-6 py-5">
             {intent === "reparse" && (

@@ -16,6 +16,9 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { projectApi, type Project } from "@/lib/api/project";
 import { CreateProjectDialog } from "@/components/dashboard/create-project-dialog";
+import { scriptApi } from "@/lib/api/script";
+import { buildRandomTemplateStoryPrompt, type VideoTemplate } from "@/lib/video-templates";
+import { usePipelineStore } from "@/lib/store/pipeline-store";
 
 // 动画
 const containerVariants = {
@@ -78,6 +81,19 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const { addPipeline, setPanelExpanded, setExpandedTaskId } = usePipelineStore();
+
+  const handleProjectCreated = async (project: { id: number; name: string }, template?: VideoTemplate) => {
+    if (!template) { await fetchProjects(); return; }
+    const script = await scriptApi.create({ projectId: project.id, title: project.name, rawContent: buildRandomTemplateStoryPrompt(template) });
+    const pipelineId = addPipeline({
+      label: `模板生成剧本 - ${project.name}`,
+      projectId: project.id,
+      request: { agentType: "story_to_script", category: "pipeline", title: `随机生成：${template.name}`, projectId: project.id, context: { scriptId: script.id, templateId: template.id } },
+      onComplete: () => router.push(`/projects/${project.id}/scripts`),
+    });
+    setPanelExpanded(true); setExpandedTaskId(pipelineId); await fetchProjects(); router.push(`/projects/${project.id}/scripts`);
+  };
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -284,7 +300,7 @@ export default function ProjectsPage() {
       <CreateProjectDialog
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={fetchProjects}
+        onCreated={handleProjectCreated}
       />
     </>
   );

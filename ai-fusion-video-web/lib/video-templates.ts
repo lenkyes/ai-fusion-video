@@ -31,6 +31,7 @@ export type VideoTemplate = {
     bgmDuckDb: number;
   };
   audio: {
+    bgmUrl?: string;
     bgmVolume: number;
     originalAudioVolume: number;
   };
@@ -54,7 +55,7 @@ export const VIDEO_TEMPLATES: VideoTemplate[] = [
       style: ["自然轻微晃动", "偶发自动对焦", "真实环境光", "行走与呼吸感", "普通生活细节"],
     },
     voiceover: { enabled: true, person: "first", tone: "克制、口语化、像深夜回忆", maxSentenceLength: 18, bgmDuckDb: -6 },
-    audio: { bgmVolume: .34, originalAudioVolume: .18 },
+    audio: { bgmUrl: undefined, bgmVolume: .34, originalAudioVolume: .18 },
     beats: [
       { id: "open", start: 0, end: 8, label: "记忆入口", purpose: "用一个动作或物件建立人物关系", shotGuidance: "推门、低头看手、窗外或旧物，慢速手持", voiceoverGuidance: "一到两句，不交代完整背景" },
       { id: "setup", start: 8, end: 22, label: "生活片段", purpose: "给出具体相处细节", shotGuidance: "2-4 个日常 POV 镜头，保留环境声", voiceoverGuidance: "口语短句，描述当时不理解的细节" },
@@ -75,3 +76,31 @@ export function buildTemplateGenerationPrompt(template: VideoTemplate, storySeed
   ).join("\n");
   return `【视频模板】${template.name}\n【故事主题】${storySeed.trim() || "请根据用户后续输入确定"}\n【总时长】${template.duration}秒，${template.aspectRatio}\n【创作规则】${template.storyPrompt}\n【镜头风格】${template.camera.style.join("、")}\n【禁止】${template.negativePrompt.join("、")}\n【念白】${template.voiceover.person === "first" ? "第一人称" : "第三人称"}，${template.voiceover.tone}，单句不超过${template.voiceover.maxSentenceLength}字\n【节拍结构】\n${beatPlan}`;
 }
+
+export function buildRandomTemplateStoryPrompt(template: VideoTemplate) {
+  return buildTemplateGenerationPrompt(template,
+    "请自行随机创作一个全新的故事。不要询问用户主题；避免复用常见示例、人物关系、地点、关键物件和反转。每次生成都应更换人物、生活处境与情绪触发事件。"
+  );
+}
+
+export type VideoTemplateRecord = {
+  id: number; code: string; name: string; category: string; description: string;
+  coverUrl: string | null; configJson: string; version: number; status: number;
+  sortOrder: number; createTime: string; updateTime: string;
+};
+
+export type EditableVideoTemplate = Omit<VideoTemplateRecord, "id" | "version" | "createTime" | "updateTime">;
+
+export function parseTemplateRecord(record: VideoTemplateRecord): VideoTemplate {
+  return { ...(JSON.parse(record.configJson) as Omit<VideoTemplate, "id" | "version" | "name" | "category" | "description">),
+    id: record.code, version: record.version, name: record.name, category: record.category, description: record.description };
+}
+
+export const videoTemplateApi = {
+  listRecords: (publishedOnly = true) => http.get<never, VideoTemplateRecord[]>(`/api/video-template/list?publishedOnly=${publishedOnly}`),
+  list: async (publishedOnly = true) => (await videoTemplateApi.listRecords(publishedOnly)).map(parseTemplateRecord),
+  create: (value: EditableVideoTemplate) => http.post<never, VideoTemplateRecord>("/api/video-template", value),
+  update: (id: number, value: EditableVideoTemplate) => http.put<never, VideoTemplateRecord>(`/api/video-template/${id}`, value),
+  delete: (id: number) => http.delete<never, boolean>(`/api/video-template/${id}`),
+};
+import { http } from "@/lib/api/client";

@@ -524,7 +524,7 @@ public class AiAssistantService {
 
         if (template.contains("{storyboardDurationRule}")) {
             template = template.replace("{storyboardDurationRule}",
-                    VideoTemplateContext.buildStoryboardRule(reqVO.getContext()));
+                    StoryboardDurationContext.buildPromptRule(reqVO.getContext()));
         }
 
         // 2. 注入 autoReferences 中的上下文 ID

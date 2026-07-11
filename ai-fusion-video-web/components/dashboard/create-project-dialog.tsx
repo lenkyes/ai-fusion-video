@@ -19,6 +19,7 @@ import { artStyleApi } from "@/lib/api/art-style";
 import type { ArtStylePreset } from "@/lib/api/art-style";
 import { storageConfigApi, uploadFile } from "@/lib/api/storage";
 import { resolveMediaUrl, http } from "@/lib/api/client";
+import { videoTemplateApi, type VideoTemplate } from "@/lib/video-templates";
 
 // 项目类型选项
 const projectTypes = ["漫剧", "短剧", "动画", "纪录片", "宣传片", "MV"];
@@ -34,7 +35,7 @@ const aspectRatios = [
 interface CreateProjectDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (project: { id: number; name: string }, template?: VideoTemplate) => void;
 }
 
 export function CreateProjectDialog({
@@ -46,6 +47,8 @@ export function CreateProjectDialog({
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [templates, setTemplates] = useState<VideoTemplate[]>([]);
 
   // 项目配置
   const [projectType, setProjectType] = useState(projectTypes[0]);
@@ -64,6 +67,7 @@ export function CreateProjectDialog({
   // 对话框打开时加载数据
   useEffect(() => {
     if (!open) return;
+    videoTemplateApi.list(true).then(setTemplates).catch(() => setTemplates([]));
 
     // 加载画风预设，默认选第一个
     setPresetsLoading(true);
@@ -104,12 +108,13 @@ export function CreateProjectDialog({
     setProjectType(projectTypes[0]);
     setAspectRatio(aspectRatios[0].label);
     setArtStyle("");
+    setTemplateId("");
     setPresets([]);
     onClose();
   }, [onClose]);
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
+    if (!name.trim() && !templateId) {
       setError("请输入项目名称");
       return;
     }
@@ -117,8 +122,8 @@ export function CreateProjectDialog({
     setError("");
     try {
       const data: ProjectCreateReq = {
-        name: name.trim(),
-        properties: JSON.stringify({ type: projectType, aspectRatio }),
+        name: name.trim() || `${templates.find(template => template.id === templateId)?.name || "模板项目"} ${new Date().toLocaleDateString("zh-CN")}`,
+        properties: JSON.stringify({ type: projectType, aspectRatio, videoTemplateId: templateId || undefined, videoTemplateSnapshot: templates.find(template => template.id === templateId) || undefined }),
       };
       if (description.trim()) data.description = description.trim();
 
@@ -129,7 +134,7 @@ export function CreateProjectDialog({
         await projectApi.update({ id: created.id, artStyle });
       }
 
-      onCreated();
+      onCreated({ id: created.id, name: created.name }, templates.find(template => template.id === templateId));
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
@@ -210,6 +215,15 @@ export function CreateProjectDialog({
 
               {/* 可滚动内容区 */}
               <div className="overflow-y-auto flex-1 px-6 space-y-5 pb-2">
+                <div>
+                  <div className="mb-2 flex items-center gap-2"><Type className="h-4 w-4 text-primary"/><span className="text-sm font-medium">创建方式</span></div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button type="button" onClick={()=>setTemplateId("")} className={cn("rounded-lg border p-3 text-left transition-colors",!templateId?"border-primary bg-primary/10":"border-border hover:bg-muted/50")}><span className="block text-sm font-medium">空白项目</span><span className="mt-1 block text-xs text-muted-foreground">按常规流程创建剧本和分镜</span></button>
+                    {templates.map(template=><button key={template.id} type="button" onClick={()=>{setTemplateId(template.id);setAspectRatio(template.aspectRatio);setProjectType("短剧");}} className={cn("rounded-lg border p-3 text-left transition-colors",templateId===template.id?"border-primary bg-primary/10":"border-border hover:bg-muted/50")}><span className="block text-sm font-medium">{template.name}</span><span className="mt-1 block text-xs text-muted-foreground">{template.description}</span></button>)}
+                  </div>
+                  {templateId&&<p className="mt-2 text-xs text-muted-foreground">创建后将自动随机生成完整故事和剧本，不需要填写故事情节。</p>}
+                </div>
+                <div className="border-t border-border/20" />
                 {/* 基本信息 */}
                 <div className="space-y-3">
                   <div>
