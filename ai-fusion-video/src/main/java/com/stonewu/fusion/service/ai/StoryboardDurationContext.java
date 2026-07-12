@@ -13,6 +13,9 @@ public final class StoryboardDurationContext {
     public static final String SHOT_DURATION_KEY = "shotDuration";
     public static final String MODE_REGULAR = "regular";
     public static final String MODE_CUSTOM = "custom";
+    public static final BigDecimal REGULAR_MIN_DURATION = BigDecimal.valueOf(4);
+    public static final BigDecimal REGULAR_MAX_DURATION = BigDecimal.valueOf(15);
+    public static final BigDecimal REGULAR_DEFAULT_DURATION = BigDecimal.valueOf(5);
 
     private static final BigDecimal MIN_DURATION = BigDecimal.ONE;
     private static final BigDecimal MAX_DURATION = BigDecimal.valueOf(60);
@@ -53,6 +56,9 @@ public final class StoryboardDurationContext {
     }
 
     public static String buildPromptRule(Map<String, Object> requestContext) {
+        if (MODE_REGULAR.equals(resolveMode(requestContext))) {
+            return "常规模式：每个镜头 duration 必须在 4-15 秒之间，缺失时按 5 秒规划；禁止生成低于 4 秒或超过 15 秒的镜头。应根据剧情节奏在范围内设计镜头，而不是依赖模型默认时长。";
+        }
         BigDecimal fixedDuration = resolveFixedDuration(requestContext);
         if (fixedDuration == null) {
             return "常规模式（regular）：根据剧情节奏分别设计每个镜头的时长，各镜头不要求统一时长。";

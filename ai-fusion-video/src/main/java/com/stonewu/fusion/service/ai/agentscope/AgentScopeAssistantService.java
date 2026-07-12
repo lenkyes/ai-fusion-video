@@ -712,9 +712,11 @@ public class AgentScopeAssistantService {
             return null;
         }
 
-        // 创建 Toolkit（启用并行执行）
+        // 视频分镜调度器依赖前一镜头落库后的尾帧，必须强制串行。
+        // 其他 Agent 仍可并行执行彼此独立的工具。
+        boolean sequentialVideoDispatch = "storyboard_video_gen".equals(agentType);
         Toolkit toolkit = new Toolkit(ToolkitConfig.builder()
-                .parallel(true) // 并行执行多工具
+                .parallel(!sequentialVideoDispatch)
                 .executionConfig(ExecutionConfig.builder()
                         .timeout(resolveToolExecutionTimeout())
                         .build())
@@ -794,7 +796,8 @@ public class AgentScopeAssistantService {
 
                         if (!finalSubTools.isEmpty()) {
                             Toolkit subToolkit = new Toolkit(ToolkitConfig.builder()
-                                    .parallel(true)
+                                    // 子 Agent 的 generate_video 也不能与同轮其他工具并发，避免读取到旧状态。
+                                    .parallel(false)
                                     .executionConfig(ExecutionConfig.builder()
                                             .timeout(resolveToolExecutionTimeout())
                                             .build())

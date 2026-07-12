@@ -15,6 +15,7 @@ import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
+import com.stonewu.fusion.service.generation.VideoTailFrameService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
@@ -22,6 +23,7 @@ import com.stonewu.fusion.service.system.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -54,6 +56,8 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
     private final SystemConfigService systemConfigService;
     private final StoryboardService storyboardService;
+    @Autowired(required = false)
+    private VideoTailFrameService videoTailFrameService;
 
     @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
     private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
@@ -227,6 +231,11 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             if (storyboardItemId != null) {
                 StoryboardFrameInputs frameInputs = resolveStoryboardFrameInputs(storyboardItemId);
                 previousShotInputs = resolvePreviousShotInputs(storyboardItemId);
+                if (StrUtil.isNotBlank(previousShotInputs.videoUrl())
+                        && StrUtil.isBlank(previousShotInputs.lastFrameImageUrl())) {
+                    log.warn("[generate_video] 上一镜头存在视频但没有可用尾帧图，将退化为视频参考: storyboardItemId={}, previousItemId={}",
+                            storyboardItemId, previousShotInputs.storyboardItemId());
+                }
                 if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)) {
                     firstFrameImageUrl = firstNonBlank(
                             previousShotInputs.lastFrameImageUrl(),
@@ -311,6 +320,15 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             if (videoItem == null) {
                 return errorResult("生成完成但未获取到视频 URL");
+            }
+
+            if (StrUtil.isBlank(videoItem.getLastFrameUrl()) && videoTailFrameService != null) {
+                String accessibleVideoUrl = resolvePublicMediaUrl(videoItem.getVideoUrl(), "generatedVideoUrl");
+                String extractedTailFrame = videoTailFrameService.extractAndStore(accessibleVideoUrl);
+                if (StrUtil.isNotBlank(extractedTailFrame)) {
+                    videoItem.setLastFrameUrl(extractedTailFrame);
+                    videoGenerationService.updateItem(videoItem);
+                }
             }
 
             persistStoryboardGenerationResult(storyboardItemId, videoItem);

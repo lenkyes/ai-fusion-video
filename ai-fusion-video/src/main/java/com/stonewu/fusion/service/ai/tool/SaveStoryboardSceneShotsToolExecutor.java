@@ -226,7 +226,7 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
 
                 BigDecimal shotDuration = fixedShotDuration != null
                         ? fixedShotDuration
-                        : parseShotDuration(shot);
+                        : normalizeRegularDuration(parseShotDuration(shot));
                 StoryboardItem item = StoryboardItem.builder()
                         .storyboardId(storyboardId)
                         .storyboardEpisodeId(storyboardEpisodeId)
@@ -299,5 +299,18 @@ public class SaveStoryboardSceneShotsToolExecutor implements ToolExecutor {
 
     private BigDecimal parseShotDuration(JSONObject shot) {
         return shot.get("duration") != null ? new BigDecimal(shot.getStr("duration")) : null;
+    }
+
+    private BigDecimal normalizeRegularDuration(BigDecimal value) {
+        if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
+            return StoryboardDurationContext.REGULAR_DEFAULT_DURATION;
+        }
+        if (value.compareTo(StoryboardDurationContext.REGULAR_MIN_DURATION) < 0) {
+            return StoryboardDurationContext.REGULAR_MIN_DURATION;
+        }
+        if (value.compareTo(StoryboardDurationContext.REGULAR_MAX_DURATION) > 0) {
+            return StoryboardDurationContext.REGULAR_MAX_DURATION;
+        }
+        return value.setScale(Math.min(value.scale(), 3), java.math.RoundingMode.HALF_UP);
     }
 }
