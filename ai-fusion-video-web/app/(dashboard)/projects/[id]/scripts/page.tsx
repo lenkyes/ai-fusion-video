@@ -228,6 +228,12 @@ export default function ScriptTabPage() {
   const projectTemplate = (project?.properties?.videoTemplateSnapshot as VideoTemplate | undefined)
     || getVideoTemplate(templateId);
 
+  useEffect(() => {
+    const generatedTitle = script?.title?.trim();
+    if (!projectTemplate || !generatedTitle || generatedTitle === project?.name) return;
+    void projectApi.update({ id: projectId, name: generatedTitle }).then(() => refreshProject());
+  }, [project?.name, projectId, projectTemplate, refreshProject, script?.title]);
+
   const regenerateTemplateStory = async () => {
     if (!projectTemplate || !script || regenerating) return;
     if (!confirm("将删除当前剧本及其分集、场次并随机生成一个全新故事，是否继续？")) return;

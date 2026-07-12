@@ -3,9 +3,11 @@ package com.stonewu.fusion.service.ai.tool;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.script.Script;
+import com.stonewu.fusion.entity.project.Project;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.script.ScriptService;
+import com.stonewu.fusion.service.project.ProjectService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Component;
 public class UpdateScriptInfoToolExecutor implements ToolExecutor {
 
     private final ScriptService scriptService;
+    private final ProjectService projectService;
 
     @Override
     public String getToolName() {
@@ -86,6 +89,7 @@ public class UpdateScriptInfoToolExecutor implements ToolExecutor {
             }
 
             scriptService.update(script);
+            syncTemplateProjectName(script, params);
 
             if (!updatedFields.isEmpty()) {
                 updatedFields.setLength(updatedFields.length() - 1);
@@ -96,6 +100,26 @@ public class UpdateScriptInfoToolExecutor implements ToolExecutor {
         } catch (Exception e) {
             log.error("更新剧本信息失败", e);
             return JSONUtil.createObj().set("status", "error").set("message", "更新失败: " + e.getMessage()).toString();
+        }
+    }
+
+    private void syncTemplateProjectName(Script script, JSONObject params) {
+        if (!params.containsKey("title") || script.getProjectId() == null
+                || script.getTitle() == null || script.getTitle().isBlank()) {
+            return;
+        }
+        Project project = projectService.getById(script.getProjectId());
+        String properties = project.getProperties();
+        if (properties == null || !properties.contains("\"videoTemplateId\"")) {
+            return;
+        }
+        String title = script.getTitle().trim();
+        if (!title.equals(project.getName())) {
+            Project update = new Project();
+            update.setId(project.getId());
+            update.setName(title);
+            projectService.update(update);
+            log.info("[update_script_info] 模板项目名称已同步: projectId={}, title={}", project.getId(), title);
         }
     }
 }
