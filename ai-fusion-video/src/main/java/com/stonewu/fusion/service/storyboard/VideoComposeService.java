@@ -181,9 +181,23 @@ public class VideoComposeService {
         List<ComposeClip> available = collectEpisodeComposeClips(episodeId);
         List<ComposeClip> edited = new ArrayList<>();
         for (ComposeEpisodeVideoReqVO.EditorClip requested : requestedClips) {
-            if (requested == null || requested.getItemId() == null) {
-                throw new BusinessException("剪辑片段缺少 itemId");
+            if (requested == null) {
+                throw new BusinessException("剪辑片段不能为空");
             }
+            if ((requested.getItemId() == null || requested.getItemId() <= 0)
+                    && StringUtils.hasText(requested.getSourceUrl())) {
+                String sourceUrl = requested.getSourceUrl().trim();
+                if (!sourceUrl.startsWith(LOCAL_MEDIA_PUBLIC_PREFIX) && !isAbsoluteHttpUrl(sourceUrl)) {
+                    throw new BusinessException("编辑器素材地址无效");
+                }
+                StoryboardItem uploaded = StoryboardItem.builder().id(-1L).duration(BigDecimal.valueOf(
+                        finiteDuration(requested.getDuration(), DEFAULT_CLIP_DURATION_SECONDS))).build();
+                edited.add(new ComposeClip(uploaded, sourceUrl,
+                        finitePositiveOrZero(requested.getSourceStart()),
+                        finiteDuration(requested.getDuration(), DEFAULT_CLIP_DURATION_SECONDS)));
+                continue;
+            }
+            if (requested.getItemId() == null) throw new BusinessException("剪辑片段缺少 itemId");
             ComposeClip source = available.stream()
                     .filter(clip -> requested.getItemId().equals(clip.item().getId()))
                     .findFirst()

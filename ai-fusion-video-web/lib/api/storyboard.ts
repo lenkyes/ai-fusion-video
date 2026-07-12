@@ -182,6 +182,7 @@ export interface ComposeEpisodeVideoReq {
     itemId: number;
     sourceStart: number;
     duration: number;
+    sourceUrl?: string;
   }>;
 }
 

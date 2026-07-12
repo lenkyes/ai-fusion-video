@@ -41,6 +41,8 @@ public class FileUploadController {
             "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4",
             "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac", "application/ogg"
     );
+    private static final Set<String> ALLOWED_VIDEO_EXTENSIONS = Set.of("mp4", "mov", "webm", "m4v", "avi", "mkv");
+    private static final long MAX_VIDEO_FILE_SIZE = 1024L * 1024 * 1024;
 
     private final MediaStorageService mediaStorageService;
 
@@ -108,6 +110,29 @@ public class FileUploadController {
                     log.warn("[FileUpload] 临时音频清理失败: {}", tempFile, e);
                 }
             }
+        }
+    }
+
+    @PostMapping("/upload-video")
+    @Operation(summary = "上传剪辑视频素材")
+    public CommonResult<String> uploadVideo(@RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) throw new BusinessException("视频文件不能为空");
+        if (file.getSize() > MAX_VIDEO_FILE_SIZE) throw new BusinessException("视频文件大小不能超过 1GB");
+        String extension = getExtension(file.getOriginalFilename()).toLowerCase(Locale.ROOT);
+        String contentType = file.getContentType() != null ? file.getContentType().toLowerCase(Locale.ROOT) : "";
+        if (!ALLOWED_VIDEO_EXTENSIONS.contains(extension)
+                || (!contentType.isBlank() && !contentType.startsWith("video/"))) {
+            throw new BusinessException("仅支持 MP4、MOV、WebM、M4V、AVI、MKV 视频");
+        }
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("editor_video_upload_", "." + extension);
+            file.transferTo(tempFile);
+            return CommonResult.success(mediaStorageService.storeFile(tempFile, "videos/editor", extension));
+        } catch (IOException e) {
+            throw new BusinessException("视频上传失败: " + e.getMessage());
+        } finally {
+            if (tempFile != null) try { Files.deleteIfExists(tempFile); } catch (IOException ignored) { }
         }
     }
 

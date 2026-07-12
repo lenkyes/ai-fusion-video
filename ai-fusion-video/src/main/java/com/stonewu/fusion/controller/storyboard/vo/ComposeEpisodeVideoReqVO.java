@@ -35,6 +35,9 @@ public class ComposeEpisodeVideoReqVO {
         @Schema(description = "分镜镜头 ID", requiredMode = Schema.RequiredMode.REQUIRED)
         private Long itemId;
 
+        @Schema(description = "编辑器上传素材 URL；仅允许受信媒体存储地址")
+        private String sourceUrl;
+
         @Schema(description = "素材入点，单位秒")
         private Double sourceStart;
 
