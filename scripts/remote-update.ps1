@@ -288,6 +288,7 @@ $PrivateKeyPath = Resolve-RequiredPath -Path $PrivateKeyPath -Label "Private key
 
 $UpdateBackend = $UpdateMode -eq "both" -or $UpdateMode -eq "backend"
 $UpdateFrontend = $UpdateMode -eq "both" -or $UpdateMode -eq "frontend"
+$UpdateNginx = $UpdateMode -eq "both"
 
 $SourceFolders = @()
 $SelectedContainerNames = @()
@@ -314,6 +315,11 @@ if ($UpdateFrontend) {
     }
     $SelectedImageNames += $FrontendImageNames
     $SelectedServices += $FrontendService
+}
+
+if ($UpdateNginx) {
+    # nginx.conf is bind-mounted, so recreate the service to load changes.
+    $SelectedServices += "nginx"
 }
 
 $RemoteBasePath = $RemoteBasePath.TrimEnd("/")
