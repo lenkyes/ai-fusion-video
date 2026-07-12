@@ -23,6 +23,12 @@ export type VideoTemplate = {
     device: string;
     style: string[];
   };
+  protagonist?: {
+    role: "camera_holder" | "visible_character";
+    visualAssetPolicy: "none" | "partial_only" | "standard";
+    allowedVisibility: string[];
+    forbidStandardCharacterPortrait: boolean;
+  };
   voiceover: {
     enabled: boolean;
     person: "first" | "third";
@@ -54,6 +60,12 @@ export const VIDEO_TEMPLATES: VideoTemplate[] = [
       device: "handheld_phone",
       style: ["自然轻微晃动", "偶发自动对焦", "真实环境光", "行走与呼吸感", "普通生活细节"],
     },
+    protagonist: {
+      role: "camera_holder",
+      visualAssetPolicy: "partial_only",
+      allowedVisibility: ["手部", "腿部", "局部倒影", "模糊影子"],
+      forbidStandardCharacterPortrait: true,
+    },
     voiceover: { enabled: true, person: "first", tone: "克制、口语化、像深夜回忆", maxSentenceLength: 18, bgmDuckDb: -6 },
     audio: { bgmUrl: undefined, bgmVolume: .34, originalAudioVolume: .18 },
     beats: [
@@ -74,7 +86,10 @@ export function buildTemplateGenerationPrompt(template: VideoTemplate, storySeed
   const beatPlan = template.beats.map(beat =>
     `${beat.start}-${beat.end}秒 ${beat.label}：${beat.purpose}；镜头：${beat.shotGuidance}；念白：${beat.voiceoverGuidance}`
   ).join("\n");
-  return `【视频模板】${template.name}\n【故事主题】${storySeed.trim() || "请根据用户后续输入确定"}\n【总时长】${template.duration}秒，${template.aspectRatio}\n【创作规则】${template.storyPrompt}\n【镜头风格】${template.camera.style.join("、")}\n【禁止】${template.negativePrompt.join("、")}\n【念白】${template.voiceover.person === "first" ? "第一人称" : "第三人称"}，${template.voiceover.tone}，单句不超过${template.voiceover.maxSentenceLength}字\n【节拍结构】\n${beatPlan}`;
+  const protagonistRule = template.protagonist?.role === "camera_holder"
+    ? `【POV 主角强制规则】故事中的“我”是摄像机持有者和第一人称叙事者，不是普通出镜角色。不得为“我”创建标准人物立绘、正脸参考图或全身角色资产；资产规划时不要把“我”传给角色资产创建工具。剧本场次不得写“主角站在画面中”等第三人称描述，必须写成摄像机所见和我的主观动作。画面最多允许出现：${template.protagonist.allowedVisibility.join("、")}。其他被“我”观察的人物可以正常创建角色资产。念白统一标记为 VO（我）。`
+    : "";
+  return `【视频模板】${template.name}\n【故事主题】${storySeed.trim() || "请根据用户后续输入确定"}\n【总时长】${template.duration}秒，${template.aspectRatio}\n【创作规则】${template.storyPrompt}\n${protagonistRule}\n【镜头风格】${template.camera.style.join("、")}\n【禁止】${template.negativePrompt.join("、")}\n【念白】${template.voiceover.person === "first" ? "第一人称" : "第三人称"}，${template.voiceover.tone}，单句不超过${template.voiceover.maxSentenceLength}字\n【节拍结构】\n${beatPlan}`;
 }
 
 export function buildRandomTemplateStoryPrompt(template: VideoTemplate) {

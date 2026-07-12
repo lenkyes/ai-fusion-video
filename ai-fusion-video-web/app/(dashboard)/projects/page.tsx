@@ -90,7 +90,15 @@ export default function ProjectsPage() {
       label: `模板生成剧本 - ${project.name}`,
       projectId: project.id,
       request: { agentType: "story_to_script", category: "pipeline", title: `随机生成：${template.name}`, projectId: project.id, context: { scriptId: script.id, templateId: template.id } },
-      onComplete: () => router.push(`/projects/${project.id}/scripts`),
+      onComplete: async () => {
+        const generatedScript = await scriptApi.get(script.id);
+        const generatedTitle = generatedScript.title?.trim();
+        if (generatedTitle && generatedTitle !== project.name) {
+          await projectApi.update({ id: project.id, name: generatedTitle });
+        }
+        await fetchProjects();
+        router.push(`/projects/${project.id}/scripts`);
+      },
     });
     setPanelExpanded(true); setExpandedTaskId(pipelineId); await fetchProjects(); router.push(`/projects/${project.id}/scripts`);
   };

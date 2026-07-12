@@ -4,7 +4,7 @@ import { Copy,Loader2,Pencil,Plus,Save,Trash2,X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { videoTemplateApi,type EditableVideoTemplate,type VideoTemplateRecord } from "@/lib/video-templates";
-const EMPTY=JSON.stringify({duration:60,aspectRatio:"9:16",projectType:"短剧",storyPrompt:"",negativePrompt:[],camera:{perspective:"first_person_pov",device:"handheld_phone",style:[]},voiceover:{enabled:true,person:"first",tone:"",maxSentenceLength:18,bgmDuckDb:-6},audio:{bgmUrl:"",bgmVolume:.34,originalAudioVolume:.18},beats:[]},null,2);
+const EMPTY=JSON.stringify({duration:60,aspectRatio:"9:16",projectType:"短剧",storyPrompt:"",negativePrompt:[],camera:{perspective:"first_person_pov",device:"handheld_phone",style:[]},protagonist:{role:"camera_holder",visualAssetPolicy:"partial_only",allowedVisibility:["手部","腿部","局部倒影","模糊影子"],forbidStandardCharacterPortrait:true},voiceover:{enabled:true,person:"first",tone:"",maxSentenceLength:18,bgmDuckDb:-6},audio:{bgmUrl:"",bgmVolume:.34,originalAudioVolume:.18},beats:[]},null,2);
 const blank=():EditableVideoTemplate=>({code:"",name:"",category:"通用",description:"",coverUrl:null,configJson:EMPTY,status:0,sortOrder:0});
 export default function Page(){const[items,setItems]=useState<VideoTemplateRecord[]>([]),[form,setForm]=useState<EditableVideoTemplate|null>(null),[editingId,setEditingId]=useState<number>(),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState("");
 async function load(){setLoading(true);try{setItems(await videoTemplateApi.listRecords(false))}finally{setLoading(false)}}useEffect(()=>{void load()},[]);

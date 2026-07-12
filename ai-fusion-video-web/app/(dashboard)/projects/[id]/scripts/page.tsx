@@ -20,6 +20,7 @@ import { ParseScriptDialog } from "@/components/dashboard/parse-script-dialog";
 import { EpisodeParseDialog } from "@/components/dashboard/episode-parse-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 import { useProject } from "../project-context";
+import { projectApi } from "@/lib/api/project";
 import { buildRandomTemplateStoryPrompt, getVideoTemplate } from "@/lib/video-templates";
 import type { VideoTemplate } from "@/lib/video-templates";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ import { Button } from "@/components/ui/button";
 export default function ScriptTabPage() {
   const params = useParams();
   const projectId = Number(params.id);
-  const { project } = useProject();
+  const { project, refresh: refreshProject } = useProject();
 
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
@@ -237,7 +238,15 @@ export default function ScriptTabPage() {
       setScript(created); setEpisodes([]); setEpisodeScenes({});
       const pipelineId = addPipeline({ label: `换一个故事 - ${projectTemplate.name}`, projectId,
         request: { agentType: "story_to_script", category: "pipeline", title: `随机生成：${projectTemplate.name}`, projectId, context: { scriptId: created.id, templateId: projectTemplate.id } },
-        onComplete: loadScript });
+        onComplete: async () => {
+          const generatedScript = await scriptApi.get(created.id);
+          const generatedTitle = generatedScript.title?.trim();
+          if (generatedTitle && generatedTitle !== project?.name) {
+            await projectApi.update({ id: projectId, name: generatedTitle });
+            await refreshProject();
+          }
+          await loadScript();
+        } });
       setPanelExpanded(true); setExpandedTaskId(pipelineId);
     } finally { setRegenerating(false); }
   };
