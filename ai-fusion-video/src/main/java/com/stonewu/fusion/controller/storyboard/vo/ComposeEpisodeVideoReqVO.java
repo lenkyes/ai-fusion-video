@@ -43,5 +43,20 @@ public class ComposeEpisodeVideoReqVO {
 
         @Schema(description = "片段时长，单位秒")
         private Double duration;
+
+        @Schema(description = "编辑器轨道 ID")
+        private String trackId;
+
+        @Schema(description = "轨道类型：video、overlay、audio")
+        private String trackType;
+
+        @Schema(description = "轨道是否静音")
+        private Boolean trackMuted;
+
+        @Schema(description = "轨道音量，1.0 表示原始音量")
+        private Double trackVolume;
+
+        @Schema(description = "片段在所属轨道上的开始时间，单位秒")
+        private Double timelineStart;
     }
 }

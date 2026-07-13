@@ -18,7 +18,7 @@ import { getVideoTemplate, type VideoTemplate } from "@/lib/video-templates";
 import { useProject } from "../project-context";
 
 type Clip = { id: string; itemId: number; title: string; url: string; sourceStart: number; duration: number; trackId: string; opacity?: number; filter?: string; stickers?: string[]; keyframes?: Array<{ time: number; x: number; y: number; scale: number }> };
-type Track = { id: string; name: string; type: "video" | "overlay" | "audio"; muted: boolean; locked: boolean };
+type Track = { id: string; name: string; type: "video" | "overlay" | "audio"; muted: boolean; locked: boolean; volume?: number };
 type Settings = { burnSubtitles: boolean; keepOriginalAudio: boolean; originalAudioVolume: number; bgmUrl: string; bgmVolume: number };
 type Draft = { version: 2; clips: Clip[]; tracks?: Track[]; settings: Settings; templateId?: string; storySeed?: string; updatedAt: string };
 type InspectorTab = "clip" | "audio" | "export";
@@ -49,7 +49,7 @@ export default function VideoEditorPage() {
   const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playheadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scheduledAudioTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const playingAudioRef = useRef<HTMLAudioElement[]>([]);
+  const playingAudioRef = useRef<Array<{ audio: HTMLAudioElement; trackId: string }>>([]);
   const playbackSessionRef = useRef(0);
 
   const [episode, setEpisode] = useState<StoryboardEpisode | null>(null);
@@ -135,7 +135,7 @@ export default function VideoEditorPage() {
       previewRef.current.onended = null;
       previewRef.current.pause();
     }
-    playingAudioRef.current.forEach(audio => { audio.pause(); audio.src = ""; });
+    playingAudioRef.current.forEach(({ audio }) => { audio.pause(); audio.src = ""; });
     playingAudioRef.current = [];
     setPlaying(false);
   }, []);
@@ -145,6 +145,7 @@ export default function VideoEditorPage() {
     const videoTrack = tracks.find(track => track.type === "video" && !track.muted && clips.some(clip => clip.trackId === track.id && clip.url));
     const sequence = videoTrack ? clips.filter(clip => clip.trackId === videoTrack.id && clip.url) : [];
     if (!sequence.length || !previewRef.current) return;
+    const videoTrackVolume = videoTrack?.volume ?? 1;
     const startPosition = playhead >= total ? 0 : playhead;
     let elapsed = 0;
     let index = sequence.findIndex(clip => {
@@ -157,7 +158,7 @@ export default function VideoEditorPage() {
     const initialClipOffset = Math.max(0, startPosition - elapsed);
     const startedAt = performance.now();
 
-    const startAudio = (source: { url: string; start: number; volume: number }) => {
+    const startAudio = (source: { url: string; start: number; volume: number; trackId: string }) => {
       if (playbackSessionRef.current !== sessionId) return;
       const audio = new Audio(resolveMediaUrl(source.url) || source.url);
       audio.volume = Math.min(1, Math.max(0, source.volume));
@@ -167,7 +168,7 @@ export default function VideoEditorPage() {
         void audio.play().catch(() => toast.error("音频播放失败，请检查媒体地址"));
       }, { once: true });
       audio.load();
-      playingAudioRef.current.push(audio);
+      playingAudioRef.current.push({ audio, trackId: source.trackId });
     };
     tracks.filter(track => track.type === "audio" && !track.muted).forEach(track => {
       let trackOffset = 0;
@@ -178,11 +179,11 @@ export default function VideoEditorPage() {
         if (clipEnd <= startPosition) return;
         const delay = Math.max(0, clipStart - startPosition);
         const sourceOffset = clip.sourceStart + Math.max(0, startPosition - clipStart);
-        if (delay === 0) startAudio({ url: clip.url, start: sourceOffset, volume: 1 });
-        else scheduledAudioTimersRef.current.push(setTimeout(() => startAudio({ url: clip.url, start: sourceOffset, volume: 1 }), delay * 1000));
+        if (delay === 0) startAudio({ url: clip.url, start: sourceOffset, volume: track.volume ?? 1, trackId: track.id });
+        else scheduledAudioTimersRef.current.push(setTimeout(() => startAudio({ url: clip.url, start: sourceOffset, volume: track.volume ?? 1, trackId: track.id }), delay * 1000));
       });
     });
-    if (settings.bgmUrl) startAudio({ url: settings.bgmUrl, start: startPosition, volume: settings.bgmVolume });
+    if (settings.bgmUrl) startAudio({ url: settings.bgmUrl, start: startPosition, volume: settings.bgmVolume, trackId: "bgm" });
 
     const playNext = () => {
       if (playbackSessionRef.current !== sessionId) return;
@@ -191,7 +192,7 @@ export default function VideoEditorPage() {
       const video = previewRef.current;
       video.src = resolveMediaUrl(clip.url) || "";
       video.muted = !settings.keepOriginalAudio || tracks.find(track => track.id === clip.trackId)?.muted === true;
-      video.volume = Math.min(1, Math.max(0, settings.originalAudioVolume));
+      video.volume = Math.min(1, Math.max(0, settings.originalAudioVolume * videoTrackVolume));
       setSelectedId(clip.id);
       const offsetInClip = index === startIndex ? initialClipOffset : 0;
       setPlayhead(elapsed + offsetInClip);
@@ -254,6 +255,17 @@ export default function VideoEditorPage() {
   }
   function duplicate() { if (!selected) return; const copy = { ...selected, id: `${selected.id}-${Date.now()}`, title: `${selected.title} 副本` }; const index = clips.findIndex(clip => clip.id === selected.id); commit([...clips.slice(0, index + 1), copy, ...clips.slice(index + 1)]); setSelectedId(copy.id); }
   function split() { if (!selected || selected.duration < .4) return; const half = selected.duration / 2; const right = { ...selected, id: `${selected.id}-${Date.now()}`, title: `${selected.title} B`, sourceStart: selected.sourceStart + half, duration: half }; const index = clips.findIndex(clip => clip.id === selected.id); commit([...clips.slice(0, index), { ...selected, title: `${selected.title} A`, duration: half }, right, ...clips.slice(index + 1)]); setSelectedId(right.id); }
+  function toggleTrackMute(track: Track) {
+    const muted = !track.muted;
+    setTracks(value => value.map(item => item.id === track.id ? { ...item, muted } : item));
+    playingAudioRef.current.filter(item => item.trackId === track.id).forEach(({ audio }) => { audio.muted = muted; });
+    if (previewRef.current && tracks.find(item => item.id === selected?.trackId)?.id === track.id) previewRef.current.muted = muted || !settings.keepOriginalAudio;
+  }
+  function setTrackVolume(track: Track, volume: number) {
+    setTracks(value => value.map(item => item.id === track.id ? { ...item, volume } : item));
+    playingAudioRef.current.filter(item => item.trackId === track.id).forEach(({ audio }) => { audio.volume = Math.min(1, volume); });
+    if (previewRef.current && track.type === "video") previewRef.current.volume = Math.min(1, settings.originalAudioVolume * volume);
+  }
   function addTrack(type: Track["type"]) { const count = tracks.filter(track => track.type === type).length + 1; const label = type === "audio" ? "音频" : type === "overlay" ? "叠加" : "视频"; setTracks(value => [...value, { id: `${type}-${Date.now()}`, name: `${label} ${count}`, type, muted: false, locked: false }]); }
   async function uploadMedia(file?: File) {
     if (!file) return; stop(); setUploading(true);
@@ -291,7 +303,20 @@ export default function VideoEditorPage() {
     if (targetTrackId === track.id) setTargetTrackId("video-1");
     toast.success(`已删除${track.name}`);
   }
-  async function exportVideo() { setExporting(true); save(); try { await storyboardApi.composeEpisodeVideo(episodeId, { generateSubtitleFiles: true, ...settings, clips: clips.map(({ itemId, sourceStart, duration, url }) => ({ itemId, sourceStart, duration, ...(itemId <= 0 ? { sourceUrl: url } : {}) })) }); toast.success("导出任务已提交"); router.push(`/projects/${params.id}/storyboards`); } catch { toast.error("导出任务提交失败"); } finally { setExporting(false); } }
+  async function exportVideo() {
+    setExporting(true); save();
+    try {
+      const trackOffsets = new Map<string, number>();
+      const exportClips = clips.map(({ itemId, sourceStart, duration, url, trackId }) => {
+        const track = tracks.find(item => item.id === trackId) || baseTrack;
+        const timelineStart = trackOffsets.get(trackId) || 0;
+        trackOffsets.set(trackId, timelineStart + duration);
+        return { itemId, sourceStart, duration, trackId, trackType: track.type, trackMuted: track.muted, trackVolume: track.volume ?? 1, timelineStart, ...(itemId <= 0 ? { sourceUrl: url } : {}) };
+      });
+      await storyboardApi.composeEpisodeVideo(episodeId, { generateSubtitleFiles: true, ...settings, clips: exportClips });
+      toast.success("导出任务已提交"); router.push(`/projects/${params.id}/storyboards`);
+    } catch { toast.error("导出任务提交失败"); } finally { setExporting(false); }
+  }
 
   if (loading) return <div className="flex h-[80vh] items-center justify-center bg-[#111315]"><Loader2 className="size-6 animate-spin text-white" /></div>;
   if (!episodeId) return <div className="p-8 text-sm text-muted-foreground">缺少有效的 episodeId。</div>;
@@ -340,7 +365,7 @@ export default function VideoEditorPage() {
     <section className="flex h-[250px] shrink-0 flex-col border-t border-white/10 bg-[#141619]">
       <div className="flex h-10 shrink-0 items-center border-b border-white/10 px-2"><Button size="icon-xs" variant="ghost" title="撤销" disabled={!undoStack.length} onClick={undo} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Undo2 /></Button><Button size="icon-xs" variant="ghost" title="重做" disabled={!redoStack.length} onClick={redo} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Redo2 /></Button><div className="mx-2 h-5 w-px bg-white/10" /><Button size="icon-xs" variant="ghost" title="在播放头分割" disabled={!selected} onClick={split} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Scissors /></Button><Button size="icon-xs" variant="ghost" title="删除" disabled={!selected} onClick={removeSelected} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Trash2 /></Button><div className="mx-2 h-5 w-px bg-white/10" /><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("video")}><Plus />视频轨</Button><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("overlay")}><Layers3 />叠加轨</Button><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("audio")}><Music2 />音频轨</Button><div className="ml-auto flex items-center"><ZoomOut className="size-3.5 text-zinc-600" /><input className="mx-2 w-24 accent-sky-400" type="range" min="24" max="80" value={scale} onChange={event => setScale(+event.target.value)} /><ZoomIn className="size-3.5 text-zinc-600" /><Button size="icon-xs" variant="ghost" title="重置草稿" className="ml-2 text-zinc-500 hover:bg-white/10 hover:text-white" onClick={() => { localStorage.removeItem(storageKey); location.reload(); }}><RotateCcw /></Button></div></div>
       <div ref={timelineScrollRef} className="min-h-0 flex-1 overflow-auto"><div className="relative min-h-full" style={{ width: timelineWidth + 144 }}><div className="sticky left-0 z-30 flex h-6 w-36 items-center border-r border-white/10 bg-[#191b1f] px-3 text-[9px] text-zinc-600">轨道</div><div className="absolute left-36 top-0 h-6 cursor-crosshair border-b border-white/10" style={{ width: timelineWidth }} onPointerDown={event => { stop(); setPlayhead(Math.min(total, Math.max(0, (event.clientX - event.currentTarget.getBoundingClientRect().left) / scale))); }}>{Array.from({ length: Math.ceil(timelineWidth / scale) + 1 }, (_, index) => <span key={index} className="absolute top-0 h-2 border-l border-white/20 pl-1 text-[9px] text-zinc-600" style={{ left: index * scale }}>{index % 5 === 0 ? `${index}s` : ""}</span>)}</div><button type="button" aria-label="拖动播放头" title="拖动播放头" onPointerDown={beginScrub} className="absolute bottom-0 top-0 z-40 w-3 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: 144 + playhead * scale }}><span className="absolute bottom-0 left-1/2 top-0 w-px bg-sky-400" /><span className="absolute left-0 top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-sky-400" /></button>
-        <div className="pt-0">{tracks.map(track => { let offset = 0; return <div key={track.id} className="relative flex h-[62px] border-b border-white/8"><div className="sticky left-0 z-30 flex w-36 shrink-0 items-center gap-0.5 border-r border-white/10 bg-[#191b1f] px-2"><TrackIcon type={track.type} /><span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400">{track.name}</span><button title={track.muted ? "取消静音" : "静音"} onClick={() => setTracks(value => value.map(item => item.id === track.id ? { ...item, muted: !item.muted } : item))} className="p-1 text-zinc-600 hover:text-white">{track.muted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}</button><button title={track.locked ? "解锁" : "锁定"} onClick={() => setTracks(value => value.map(item => item.id === track.id ? { ...item, locked: !item.locked } : item))} className="p-1 text-zinc-600 hover:text-white">{track.locked ? <Lock className="size-3" /> : <LockOpen className="size-3" />}</button><button title="添加素材" onClick={() => { setUploadTrackId(track.id); mediaInputRef.current?.click(); }} className="p-1 text-zinc-600 hover:text-white"><Plus className="size-3" /></button>{track.id !== "video-1" && <button title="删除轨道" onClick={() => removeTrack(track)} className="p-1 text-zinc-600 hover:text-red-400"><Trash2 className="size-3" /></button>}</div><div className="relative h-full" style={{ width: timelineWidth }}>{clips.filter(clip => clip.trackId === track.id).map(clip => { const left = offset; const width = Math.max(36, clip.duration * scale - 2); offset += clip.duration * scale; return <div key={clip.id} className={`group absolute top-1 h-[52px] overflow-hidden rounded border ${clipColors[track.type]} ${selectedId === clip.id ? "ring-1 ring-white" : "hover:brightness-125"} ${track.muted ? "opacity-45" : ""}`} style={{ left, width }}><button type="button" onClick={() => selectClip(clip.id)} disabled={track.locked} className="absolute inset-0 w-full text-left"><span className="absolute inset-0 opacity-25">{track.type === "video" && <video src={resolveMediaUrl(clip.url) || undefined} muted className="h-full w-full object-cover" />}</span><span className="relative block truncate px-2 pt-1 pr-6 text-[10px] text-white">{clip.title}</span><span className="relative px-2 text-[9px] text-white/55">{clip.duration.toFixed(1)}s</span></button>{!track.locked && <button type="button" title="移除片段" aria-label={`移除 ${clip.title}`} onClick={() => removeClip(clip.id)} className="absolute right-0.5 top-0.5 z-10 rounded bg-black/55 p-0.5 text-white/60 opacity-0 hover:text-red-300 group-hover:opacity-100"><Trash2 className="size-3" /></button>}</div>})}</div></div>})}</div></div></div>
+        <div className="pt-0">{tracks.map(track => { let offset = 0; return <div key={track.id} className="relative flex h-[68px] border-b border-white/8"><div className="sticky left-0 z-30 flex w-36 shrink-0 flex-col justify-center border-r border-white/10 bg-[#191b1f] px-2"><div className="flex items-center gap-0.5"><TrackIcon type={track.type} /><span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400">{track.name}</span><button title={track.muted ? "取消静音" : "静音"} onClick={() => toggleTrackMute(track)} className="p-1 text-zinc-600 hover:text-white">{track.muted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}</button><button title={track.locked ? "解锁" : "锁定"} onClick={() => setTracks(value => value.map(item => item.id === track.id ? { ...item, locked: !item.locked } : item))} className="p-1 text-zinc-600 hover:text-white">{track.locked ? <Lock className="size-3" /> : <LockOpen className="size-3" />}</button><button title="添加素材" onClick={() => { setUploadTrackId(track.id); mediaInputRef.current?.click(); }} className="p-1 text-zinc-600 hover:text-white"><Plus className="size-3" /></button>{track.id !== "video-1" && <button title="删除轨道" onClick={() => removeTrack(track)} className="p-1 text-zinc-600 hover:text-red-400"><Trash2 className="size-3" /></button>}</div><div className="mt-1 flex items-center gap-1"><Volume2 className="size-2.5 text-zinc-600" /><input aria-label={`${track.name}音量`} title={`轨道音量 ${Math.round((track.volume ?? 1) * 100)}%`} className="h-2 min-w-0 flex-1 accent-sky-400" type="range" min="0" max="1" step=".01" value={track.volume ?? 1} onChange={event => setTrackVolume(track, +event.target.value)} /><span className="w-6 text-right text-[8px] text-zinc-600">{Math.round((track.volume ?? 1) * 100)}</span></div></div><div className="relative h-full" style={{ width: timelineWidth }}>{clips.filter(clip => clip.trackId === track.id).map(clip => { const left = offset; const width = Math.max(36, clip.duration * scale - 2); offset += clip.duration * scale; return <div key={clip.id} className={`group absolute top-2 h-[52px] overflow-hidden rounded border ${clipColors[track.type]} ${selectedId === clip.id ? "ring-1 ring-white" : "hover:brightness-125"} ${track.muted ? "opacity-45" : ""}`} style={{ left, width }}><button type="button" onClick={() => selectClip(clip.id)} disabled={track.locked} className="absolute inset-0 w-full text-left"><span className="absolute inset-0 opacity-25">{track.type === "video" && <video src={resolveMediaUrl(clip.url) || undefined} muted className="h-full w-full object-cover" />}</span><span className="relative block truncate px-2 pt-1 pr-6 text-[10px] text-white">{clip.title}</span><span className="relative px-2 text-[9px] text-white/55">{clip.duration.toFixed(1)}s</span></button>{!track.locked && <button type="button" title="移除片段" aria-label={`移除 ${clip.title}`} onClick={() => removeClip(clip.id)} className="absolute right-0.5 top-0.5 z-10 rounded bg-black/55 p-0.5 text-white/60 opacity-0 hover:text-red-300 group-hover:opacity-100"><Trash2 className="size-3" /></button>}</div>})}</div></div>})}</div></div></div>
     </section>
   </div>;
 }

@@ -183,6 +183,11 @@ export interface ComposeEpisodeVideoReq {
     sourceStart: number;
     duration: number;
     sourceUrl?: string;
+    trackId?: string;
+    trackType?: "video" | "overlay" | "audio";
+    trackMuted?: boolean;
+    trackVolume?: number;
+    timelineStart?: number;
   }>;
 }
 
