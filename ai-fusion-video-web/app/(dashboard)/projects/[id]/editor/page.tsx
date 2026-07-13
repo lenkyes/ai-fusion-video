@@ -72,6 +72,16 @@ export default function VideoEditorPage() {
   const activeTemplate = (project?.properties?.videoTemplateSnapshot as VideoTemplate | undefined) || getVideoTemplate(typeof project?.properties?.videoTemplateId === "string" ? project.properties.videoTemplateId : "");
   const filteredClips = clips.filter(clip => clip.title.toLowerCase().includes(search.toLowerCase()));
 
+  function readMediaDuration(url: string, kind: "audio" | "video") {
+    return new Promise<number>((resolve) => {
+      const media = document.createElement(kind);
+      media.preload = "metadata";
+      media.onloadedmetadata = () => { resolve(Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 5); media.remove(); };
+      media.onerror = () => { resolve(5); media.remove(); };
+      media.src = resolveMediaUrl(url) || url;
+    });
+  }
+
   useEffect(() => {
     if (!episodeId) { setLoading(false); return; }
     void (async () => {
@@ -148,11 +158,17 @@ export default function VideoEditorPage() {
       const url = isAudio ? await uploadAudio(file) : await uploadVideo(file);
       let track = target || tracks.find(item => item.type === (isAudio ? "audio" : "video"));
       if (!track) { track = { id: `${isAudio ? "audio" : "video"}-${Date.now()}`, name: isAudio ? "音频 1" : "视频 1", type: isAudio ? "audio" : "video", muted: false, locked: false }; setTracks(value => [...value, track!]); }
-      const clip: Clip = { id: `upload-${Date.now()}`, itemId: 0, title: file.name, url, sourceStart: 0, duration: 5, trackId: track.id };
+      const duration = await readMediaDuration(url, isAudio ? "audio" : "video");
+      const clip: Clip = { id: `upload-${Date.now()}`, itemId: 0, title: file.name, url, sourceStart: 0, duration, trackId: track.id };
       commit([...clips, clip]); setSelectedId(clip.id); toast.success("素材已添加到时间线");
     } catch { toast.error("素材上传失败"); } finally { setUploading(false); if (mediaInputRef.current) mediaInputRef.current.value = ""; }
   }
   async function uploadBgm(file?: File) { if (!file) return; setUploading(true); try { const url = await uploadAudio(file); setSettings(value => ({ ...value, bgmUrl: url })); toast.success("背景音乐已更新"); } catch { toast.error("音频上传失败"); } finally { setUploading(false); } }
+  function addProjectClip(source: Clip, trackId?: string) {
+    const track = tracks.find(item => item.id === trackId) || tracks.find(item => item.type === "video") || baseTrack;
+    const copy = { ...source, id: `${source.id}-copy-${Date.now()}`, trackId: track.id };
+    commit([...clips, copy]); setSelectedId(copy.id); toast.success(`已添加到${track.name}`);
+  }
   async function exportVideo() { setExporting(true); save(); try { await storyboardApi.composeEpisodeVideo(episodeId, { generateSubtitleFiles: true, ...settings, clips: clips.map(({ itemId, sourceStart, duration, url }) => ({ itemId, sourceStart, duration, ...(itemId <= 0 ? { sourceUrl: url } : {}) })) }); toast.success("导出任务已提交"); router.push(`/projects/${params.id}/storyboards`); } catch { toast.error("导出任务提交失败"); } finally { setExporting(false); } }
 
   if (loading) return <div className="flex h-[80vh] items-center justify-center bg-[#111315]"><Loader2 className="size-6 animate-spin text-white" /></div>;
@@ -176,7 +192,7 @@ export default function VideoEditorPage() {
         <div className="flex items-center justify-between px-3 pb-2"><span className="text-[11px] font-medium text-zinc-400">项目素材 · {filteredClips.length}</span><Button size="icon-xs" variant="ghost" className="text-zinc-400 hover:bg-white/10 hover:text-white" title="导入素材" disabled={uploading} onClick={() => { setUploadTrackId(undefined); mediaInputRef.current?.click(); }}>{uploading ? <Loader2 className="animate-spin" /> : <Plus />}</Button></div>
         <input ref={mediaInputRef} hidden type="file" accept="video/*,audio/*" onChange={event => void uploadMedia(event.target.files?.[0])} />
         <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
-          {filteredClips.map(clip => <button key={clip.id} onClick={() => setSelectedId(clip.id)} className={`group overflow-hidden rounded border text-left ${selectedId === clip.id ? "border-sky-400" : "border-white/10 hover:border-white/25"}`}><div className="relative aspect-video bg-black"><video src={resolveMediaUrl(clip.url) || undefined} muted preload="metadata" className="h-full w-full object-cover opacity-80" /><span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 text-[9px] text-white">{formatTime(clip.duration)}</span></div><div className="truncate px-1.5 py-1 text-[10px] text-zinc-400 group-hover:text-white">{clip.title}</div></button>)}
+          {filteredClips.map(clip => <div key={clip.id} className={`group overflow-hidden rounded border ${selectedId === clip.id ? "border-sky-400" : "border-white/10 hover:border-white/25"}`}><button onClick={() => setSelectedId(clip.id)} className="block w-full text-left"><div className="relative aspect-video bg-black"><video src={resolveMediaUrl(clip.url) || undefined} muted preload="metadata" className="h-full w-full object-cover opacity-80" /><span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 text-[9px] text-white">{formatTime(clip.duration)}</span></div><div className="truncate px-1.5 py-1 text-[10px] text-zinc-400 group-hover:text-white">{clip.title}</div></button><div className="flex gap-1 border-t border-white/10 p-1"><select aria-label="目标轨道" className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1 text-[9px] text-zinc-500" defaultValue=""><option value="" disabled>选择视频轨</option>{tracks.filter(track => track.type !== "audio").map(track => <option key={track.id} value={track.id}>{track.name}</option>)}</select><button className="rounded bg-sky-500/20 px-1.5 text-[9px] text-sky-300 hover:bg-sky-500/35" onClick={event => { const select = event.currentTarget.previousElementSibling as HTMLSelectElement; addProjectClip(clip, select.value || undefined); }}>加入</button></div></div>)}
           {!filteredClips.length && <div className="col-span-2 py-10 text-center text-xs text-zinc-600">暂无匹配素材</div>}
         </div>
         {activeTemplate && <div className="border-t border-white/10 p-3"><div className="flex items-center gap-2 text-[11px] text-zinc-400"><Sparkles className="size-3.5 text-amber-400" /><span className="truncate">模板：{activeTemplate.name}</span></div></div>}
