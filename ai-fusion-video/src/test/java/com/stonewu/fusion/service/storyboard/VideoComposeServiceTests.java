@@ -342,6 +342,18 @@ class VideoComposeServiceTests {
                 .contains("C:/ffmpeg/bin/ffmpeg.exe");
     }
 
+    @Test
+    void stripSubtitleSpeakerPrefixRemovesSpeakerButKeepsDialogue() {
+        assertThat(VideoComposeService.stripSubtitleSpeakerPrefix("我：今天出发"))
+                .isEqualTo("今天出发");
+        assertThat(VideoComposeService.stripSubtitleSpeakerPrefix("【旁白】：夜幕降临"))
+                .isEqualTo("夜幕降临");
+        assertThat(VideoComposeService.stripSubtitleSpeakerPrefix("张三: 快走"))
+                .isEqualTo("快走");
+        assertThat(VideoComposeService.stripSubtitleSpeakerPrefix("12:30 集合"))
+                .isEqualTo("12:30 集合");
+    }
+
     private Object invokePrivate(String methodName, Object argument) throws Throwable {
         Method method = VideoComposeService.class.getDeclaredMethod(methodName, argument.getClass());
         method.setAccessible(true);

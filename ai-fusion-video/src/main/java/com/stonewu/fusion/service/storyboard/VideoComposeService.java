@@ -87,6 +87,9 @@ public class VideoComposeService {
     private static final double SUBTITLE_VERTICAL_MARGIN_RATIO = 0.065;
     private static final double SUBTITLE_LINE_WIDTH_SAFETY_RATIO = 0.9;
     private static final Pattern SUBTITLE_GRAPHEME_PATTERN = Pattern.compile("\\X");
+    private static final Pattern SUBTITLE_SPEAKER_PREFIX_PATTERN = Pattern.compile(
+            "^\\s*[\\[【（(]?\\s*([^：:\\]】）)\\n]{1,16})\\s*[\\]】）)]?\\s*[：:]\\s*"
+    );
 
     private final StoryboardService storyboardService;
     private final StoryboardEpisodeMapper episodeMapper;
@@ -740,7 +743,7 @@ public class VideoComposeService {
         }
         StringBuilder cleaned = new StringBuilder();
         for (String line : normalized.split("\n")) {
-            String trimmed = line.trim();
+            String trimmed = stripSubtitleSpeakerPrefix(line.trim());
             if (!trimmed.isEmpty()) {
                 if (cleaned.length() > 0) {
                     cleaned.append('\n');
@@ -749,6 +752,15 @@ public class VideoComposeService {
             }
         }
         return cleaned.length() == 0 ? null : cleaned.toString();
+    }
+
+    static String stripSubtitleSpeakerPrefix(String line) {
+        if (!StringUtils.hasText(line)) return "";
+        Matcher matcher = SUBTITLE_SPEAKER_PREFIX_PATTERN.matcher(line);
+        if (!matcher.find()) return line.trim();
+        String speaker = matcher.group(1);
+        boolean containsLetter = speaker.codePoints().anyMatch(Character::isLetter);
+        return containsLetter ? line.substring(matcher.end()).trim() : line.trim();
     }
 
     private String escapeSrtText(String text) {
