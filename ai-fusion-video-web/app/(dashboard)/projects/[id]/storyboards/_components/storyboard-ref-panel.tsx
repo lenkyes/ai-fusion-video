@@ -47,6 +47,7 @@ import {
 import { BatchGenDialog } from "./batch-gen-dialog";
 import type { AssetItemWithInfo, SelectedAssetItem } from "./batch-gen-dialog";
 import { VideoGenDialog } from "./video-gen-dialog";
+import { FrameGenDialog, getStoryboardFrames } from "./frame-gen-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 
 // ========== 类型 ==========
@@ -128,6 +129,7 @@ function SceneAssetPanel({
     props: [],
   });
   const [showBatchGen, setShowBatchGen] = useState(false);
+  const [showFrameGen, setShowFrameGen] = useState(false);
   const [showVideoGen, setShowVideoGen] = useState(false);
 
   // 直接从分镜 items 聚合子资产 ID（characterIds / sceneAssetItemId / propIds）
@@ -272,6 +274,12 @@ function SceneAssetPanel({
     const generationRequestId = `storyboard-video-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}`;
+    const selectedStoryboardItems = sceneGroup.items.filter((item) => selectedItemIds.includes(item.id));
+    const parallelVideoGeneration = !promptOnly && selectedStoryboardItems.length > 0
+      && selectedStoryboardItems.every((item) => {
+        const frames = getStoryboardFrames(item);
+        return !!frames.firstFrameImageUrl && !!frames.lastFrameImageUrl;
+      });
 
     addPipeline({
       label: promptOnly
@@ -289,11 +297,26 @@ function SceneAssetPanel({
           forceRegenerate: true,
           overwriteExistingVideo: true,
           generationRequestId,
+          parallelVideoGeneration,
         },
       },
       onComplete: () => {
         // 视频生成完成后可能需要刷新分镜数据
       },
+    });
+    setNotificationOpen(true);
+  };
+
+  const handleFrameGenConfirm = (selectedStoryboardItemIds: number[], overwriteFrames: boolean) => {
+    addPipeline({
+      label: `批量生首尾帧 (${selectedStoryboardItemIds.length} 个镜头)`,
+      projectId,
+      request: {
+        agentType: "storyboard_frame_gen",
+        projectId,
+        context: { selectedStoryboardItemIds, storyboardId: storyboard.id, overwriteFrames },
+      },
+      onComplete: () => undefined,
     });
     setNotificationOpen(true);
   };
@@ -338,6 +361,14 @@ function SceneAssetPanel({
       )}
 
       {/* 批量生视频按钮 */}
+      <button
+        onClick={() => setShowFrameGen(true)}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+      >
+        <ImageIcon className="h-3.5 w-3.5" />
+        批量生首尾帧
+      </button>
+
       <button
         onClick={() => setShowVideoGen(true)}
         className={cn(
@@ -411,6 +442,13 @@ function SceneAssetPanel({
         onClose={() => setShowVideoGen(false)}
         items={sceneGroup.items}
         onConfirm={handleVideoGenConfirm}
+      />
+      <FrameGenDialog
+        key={showFrameGen ? "frame-gen-open" : "frame-gen-closed"}
+        open={showFrameGen}
+        onClose={() => setShowFrameGen(false)}
+        items={sceneGroup.items}
+        onConfirm={handleFrameGenConfirm}
       />
     </div>
   );

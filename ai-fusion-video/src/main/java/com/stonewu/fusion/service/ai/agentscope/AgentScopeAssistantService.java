@@ -714,7 +714,9 @@ public class AgentScopeAssistantService {
 
         // 视频分镜调度器依赖前一镜头落库后的尾帧，必须强制串行。
         // 其他 Agent 仍可并行执行彼此独立的工具。
-        boolean sequentialVideoDispatch = "storyboard_video_gen".equals(agentType);
+        boolean preGeneratedFrames = reqVO.getContext() != null
+                && Boolean.TRUE.equals(reqVO.getContext().get("parallelVideoGeneration"));
+        boolean sequentialVideoDispatch = "storyboard_video_gen".equals(agentType) && !preGeneratedFrames;
         Toolkit toolkit = new Toolkit(ToolkitConfig.builder()
                 .parallel(!sequentialVideoDispatch)
                 .executionConfig(ExecutionConfig.builder()

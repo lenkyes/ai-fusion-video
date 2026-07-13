@@ -28,6 +28,21 @@ function parseIds(raw: number[] | string | null | undefined): number[] {
   return [];
 }
 
+function getStoryboardFrames(item: StoryboardItem) {
+  try {
+    const data = item.customData ? JSON.parse(item.customData) : {};
+    return {
+      first: (data.firstFrameImageUrl || item.generatedImageUrl || item.imageUrl || item.referenceImageUrl) as string | undefined,
+      last: data.lastFrameImageUrl as string | undefined,
+    };
+  } catch {
+    return {
+      first: (item.generatedImageUrl || item.imageUrl || item.referenceImageUrl) as string | undefined,
+      last: undefined,
+    };
+  }
+}
+
 /** 格式化资产显示名称：子变体名 (主资产名) */
 function getAssetDisplayName(subItemName: string | null | undefined, parentAssetName: string) {
   const subName = subItemName?.trim();
@@ -42,6 +57,7 @@ function getAssetDisplayName(subItemName: string | null | undefined, parentAsset
 type StoryboardTableField =
   | "shotNumber"
   | "imageUrl"
+  | "frames"
   | "generatedVideoUrl"
   | "videoPrompt"
   | "shotType"
@@ -69,6 +85,7 @@ interface ColumnDef {
 const COLUMNS: ColumnDef[] = [
   { label: "镜号", field: "shotNumber", initW: 48, minW: 40 },
   { label: "画面", field: "imageUrl", initW: 80, minW: 60, isImage: true },
+  { label: "首尾帧", field: "frames", initW: 104, minW: 88 },
   { label: "视频", field: "generatedVideoUrl", initW: 80, minW: 60, isVideo: true },
   {
     label: "分镜内容",
@@ -159,6 +176,7 @@ export function StoryboardTableView({
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string>("");
+  const [frameModes, setFrameModes] = useState<Record<number, "first" | "last">>({});
   const videoUploadInputRef = useRef<HTMLInputElement>(null);
   const videoUploadTargetItemIdRef = useRef<number | null>(null);
 
@@ -443,6 +461,57 @@ export function StoryboardTableView({
                           </div>
                         )}
                       </div>
+                    ) : col.field === "frames" ? (
+                      (() => {
+                        const frames = getStoryboardFrames(item);
+                        const mode = frameModes[item.id] || "first";
+                        const frameUrl = mode === "first" ? frames.first : frames.last;
+                        const frameLabel = mode === "first" ? "首帧" : "尾帧";
+                        return (
+                          <div className="flex h-[58px] w-[88px] flex-col items-center gap-1">
+                            <div className="flex h-4 shrink-0 rounded bg-muted/50 p-px" onClick={(e) => e.stopPropagation()}>
+                              {(["first", "last"] as const).map((value) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => setFrameModes((current) => ({ ...current, [item.id]: value }))}
+                                  className={cn(
+                                    "h-3.5 min-w-8 rounded-sm px-1 text-[9px] leading-none transition-colors",
+                                    mode === value ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                                  )}
+                                >
+                                  {value === "first" ? "首" : "尾"}
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!frameUrl}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!frameUrl) return;
+                                setPreviewImageUrl(frameUrl);
+                                setPreviewImageTitle(`镜头 #${item.shotNumber || item.autoShotNumber || ""} ${frameLabel}`);
+                              }}
+                              className={cn(
+                                "relative flex h-9 w-16 items-center justify-center overflow-hidden rounded border border-border/10 bg-muted/20",
+                                frameUrl && "cursor-zoom-in hover:border-primary/40"
+                              )}
+                            >
+                              {frameUrl ? (
+                                <SafeImage
+                                  src={resolveMediaUrl(frameUrl)}
+                                  alt={frameLabel}
+                                  fallbackType="image"
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-[9px] text-muted-foreground/50">暂无{frameLabel}</span>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })()
                     ) : col.isVideo ? (
                       <div className="flex items-center justify-center h-11 w-16 rounded-md bg-muted/20 border border-border/10 overflow-hidden shrink-0 relative group/video">
                         {(item.generatedVideoUrl || item.videoUrl) ? (

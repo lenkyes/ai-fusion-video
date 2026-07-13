@@ -238,13 +238,13 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 }
                 if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)) {
                     firstFrameImageUrl = firstNonBlank(
-                            previousShotInputs.lastFrameImageUrl(),
-                            frameInputs.firstFrameImageUrl());
-                    if (StrUtil.isNotBlank(previousShotInputs.lastFrameImageUrl())) {
+                            frameInputs.firstFrameImageUrl(),
+                            previousShotInputs.lastFrameImageUrl());
+                    if (StrUtil.isNotBlank(frameInputs.firstFrameImageUrl())) {
+                        log.info("[generate_video] 自动使用分镜镜头预生成首帧图: storyboardItemId={}", storyboardItemId);
+                    } else if (StrUtil.isNotBlank(previousShotInputs.lastFrameImageUrl())) {
                         log.info("[generate_video] 自动使用上一镜头尾帧作为首帧: storyboardItemId={}, previousItemId={}",
                                 storyboardItemId, previousShotInputs.storyboardItemId());
-                    } else if (StrUtil.isNotBlank(firstFrameImageUrl)) {
-                        log.info("[generate_video] 自动使用分镜镜头首帧图: storyboardItemId={}", storyboardItemId);
                     }
                 }
                 if (supportsLastFrame(capability) && StrUtil.isBlank(lastFrameImageUrl)

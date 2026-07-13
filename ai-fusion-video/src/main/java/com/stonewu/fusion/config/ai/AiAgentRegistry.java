@@ -60,9 +60,43 @@ public class AiAgentRegistry {
                 registerStoryboardAssetPreprocessorAgent();
                 registerAssetImageGenerationAgent();
                 registerAssetImageExecutorAgent();
+                registerStoryboardFrameGenAgent();
+                registerStoryboardFrameExecutorAgent();
                 registerStoryboardVideoGenAgent();
                 registerStoryboardVideoExecutorAgent();
                 registerStoryboardVideoQualityAgent();
+        }
+
+        private void registerStoryboardFrameGenAgent() {
+                register(AiAgentDefinition.builder()
+                                .type("storyboard_frame_gen")
+                                .name("分镜首尾帧生成")
+                                .toolNames(List.of("get_project", "get_storyboard", "get_storyboard_scene_items"))
+                                .subAgentTools(List.of(
+                                                AiAgentDefinition.SubAgentToolDef.builder()
+                                                                .toolName("generate_storyboard_frames")
+                                                                .displayName("为镜头生成首尾帧")
+                                                                .description("为单个分镜镜头生成首帧图和尾帧图并保存。message 必须包含 storyboardItemId 和 projectId。不同镜头可以并行调用。")
+                                                                .refAgentType("storyboard_frame_executor")
+                                                                .build()))
+                                .systemPrompt(loadPrompt("storyboard-frame-gen.system.md"))
+                                .instructionTemplate("<task_context><project_id>{projectId}</project_id><storyboard_id>{storyboardId}</storyboard_id></task_context>")
+                                .defaultUserMessage("请为选中的分镜镜头批量生成首帧图和尾帧图。")
+                                .enableTools(1)
+                                .build());
+        }
+
+        private void registerStoryboardFrameExecutorAgent() {
+                register(AiAgentDefinition.builder()
+                                .type("storyboard_frame_executor")
+                                .name("分镜首尾帧生成执行器")
+                                .toolNames(List.of("get_project", "get_storyboard_scene_items",
+                                                "get_generation_model_capabilities", "generate_image",
+                                                "update_storyboard_item_frames"))
+                                .systemPrompt(loadPrompt("storyboard-frame-executor.system.md"))
+                                .instructionTemplate("")
+                                .enableTools(1)
+                                .build());
         }
 
         // ========== 各 Agent 定义 ==========

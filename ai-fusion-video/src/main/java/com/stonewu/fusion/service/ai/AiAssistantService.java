@@ -123,7 +123,9 @@ public class AiAssistantService {
 
             // 启用并行工具执行
             // storyboard_video_gen 的子 Agent 依赖上一镜头生成并落库的尾帧，不能并行调度。
-            boolean sequentialVideoDispatch = "storyboard_video_gen".equals(reqVO.getAgentType());
+            boolean preGeneratedFrames = reqVO.getContext() != null
+                    && Boolean.TRUE.equals(reqVO.getContext().get("parallelVideoGeneration"));
+            boolean sequentialVideoDispatch = "storyboard_video_gen".equals(reqVO.getAgentType()) && !preGeneratedFrames;
             if (!sequentialVideoDispatch && shouldEnableParallelTools(reqVO, toolCallbacks)) {
                 agentBuilder.parallelToolExecution(true);
                 agentBuilder.maxParallelTools(10);
