@@ -46,6 +46,8 @@ export default function VideoEditorPage() {
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playheadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playingAudioRef = useRef<HTMLAudioElement[]>([]);
 
   const [episode, setEpisode] = useState<StoryboardEpisode | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -120,26 +122,56 @@ export default function VideoEditorPage() {
 
   const stop = useCallback(() => {
     if (playTimerRef.current) clearTimeout(playTimerRef.current);
-    previewRef.current?.pause(); setPlaying(false);
+    if (playheadTimerRef.current) clearInterval(playheadTimerRef.current);
+    previewRef.current?.pause();
+    playingAudioRef.current.forEach(audio => { audio.pause(); audio.src = ""; });
+    playingAudioRef.current = [];
+    setPlaying(false);
   }, []);
   const play = useCallback(() => {
     if (playing) { stop(); return; }
     const sequence = clips.filter(clip => tracks.find(track => track.id === clip.trackId)?.type === "video" && clip.url);
     if (!sequence.length || !previewRef.current) return;
     let index = 0;
+    let elapsed = 0;
+    const startedAt = performance.now();
+
+    const audioClips = clips.filter(clip => {
+      const track = tracks.find(item => item.id === clip.trackId);
+      return track?.type === "audio" && !track.muted && clip.url;
+    });
+    const audioSources = [...audioClips.map(clip => ({ url: clip.url, start: clip.sourceStart, volume: 1 })), ...(settings.bgmUrl ? [{ url: settings.bgmUrl, start: 0, volume: settings.bgmVolume }] : [])];
+    playingAudioRef.current = audioSources.map(source => {
+      const audio = new Audio(resolveMediaUrl(source.url) || source.url);
+      audio.volume = Math.min(1, Math.max(0, source.volume));
+      audio.addEventListener("loadedmetadata", () => { audio.currentTime = Math.min(source.start, Math.max(0, audio.duration - .01)); void audio.play().catch(() => toast.error("音频播放失败，请检查媒体地址")); }, { once: true });
+      audio.load();
+      return audio;
+    });
+
     const playNext = () => {
       const clip = sequence[index];
       if (!clip || !previewRef.current) { setPlayhead(0); stop(); return; }
-      previewRef.current.src = resolveMediaUrl(clip.url) || "";
-      previewRef.current.currentTime = clip.sourceStart;
-      void previewRef.current.play();
+      const video = previewRef.current;
+      video.src = resolveMediaUrl(clip.url) || "";
+      video.muted = !settings.keepOriginalAudio || tracks.find(track => track.id === clip.trackId)?.muted === true;
+      video.volume = Math.min(1, Math.max(0, settings.originalAudioVolume));
       setSelectedId(clip.id);
-      const elapsed = sequence.slice(0, index).reduce((sum, item) => sum + item.duration, 0);
       setPlayhead(elapsed);
-      playTimerRef.current = setTimeout(() => { index += 1; playNext(); }, clip.duration * 1000);
+      video.onloadedmetadata = () => {
+        video.currentTime = Math.min(clip.sourceStart, Math.max(0, video.duration - .01));
+        void video.play().then(() => {
+          playTimerRef.current = setTimeout(() => { elapsed += clip.duration; index += 1; playNext(); }, clip.duration * 1000);
+        }).catch(() => { stop(); toast.error("视频播放失败，请检查媒体地址或格式"); });
+      };
+      video.load();
     };
-    setPlaying(true); playNext();
-  }, [clips, playing, stop, tracks]);
+    setPlaying(true);
+    playheadTimerRef.current = setInterval(() => setPlayhead(Math.min(total, (performance.now() - startedAt) / 1000)), 100);
+    playNext();
+  }, [clips, playing, settings, stop, total, tracks]);
+
+  useEffect(() => () => stop(), [stop]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -216,7 +248,7 @@ export default function VideoEditorPage() {
         </div>
         <div className="p-3"><div className="relative"><Search className="absolute left-2.5 top-2.5 size-3.5 text-zinc-600" /><Input value={search} onChange={event => setSearch(event.target.value)} className="h-8 border-white/10 bg-black/20 pl-8 text-xs text-white placeholder:text-zinc-600" placeholder="搜索素材" /></div></div>
         <div className="flex items-center justify-between px-3 pb-2"><span className="text-[11px] font-medium text-zinc-400">项目素材 · {filteredClips.length}</span><Button size="icon-xs" variant="ghost" className="text-zinc-400 hover:bg-white/10 hover:text-white" title="导入素材" disabled={uploading} onClick={() => { setUploadTrackId(undefined); mediaInputRef.current?.click(); }}>{uploading ? <Loader2 className="animate-spin" /> : <Plus />}</Button></div>
-        <div className="mx-3 mb-3 flex gap-1.5"><select aria-label="素材目标轨道" value={targetTrackId} onChange={event => setTargetTrackId(event.target.value)} className="h-7 min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-2 text-[10px] text-zinc-300">{tracks.filter(track => track.type !== "audio").map(track => <option key={track.id} value={track.id}>{track.name}</option>)}</select><Button size="sm" className="h-7 bg-sky-500 px-2 text-[10px] text-white hover:bg-sky-400" disabled={!filteredClips.length} onClick={addAllProjectClips}>一键加入</Button></div>
+        <div className="mx-3 mb-3 flex gap-1.5"><select aria-label="素材目标轨道" value={targetTrackId} onChange={event => setTargetTrackId(event.target.value)} style={{ colorScheme: "dark" }} className="h-7 min-w-0 flex-1 rounded border border-white/10 bg-[#111315] px-2 text-[10px] text-white">{tracks.filter(track => track.type !== "audio").map(track => <option className="bg-[#191b1f] text-white" key={track.id} value={track.id}>{track.name}</option>)}</select><Button size="sm" className="h-7 bg-sky-500 px-2 text-[10px] text-white hover:bg-sky-400" disabled={!filteredClips.length} onClick={addAllProjectClips}>一键加入</Button></div>
         <input ref={mediaInputRef} hidden type="file" accept="video/*,audio/*" onChange={event => void uploadMedia(event.target.files?.[0])} />
         <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
           {filteredClips.map(clip => <div key={clip.id} className={`group overflow-hidden rounded border ${selectedId === clip.id ? "border-sky-400" : "border-white/10 hover:border-white/25"}`}><button onClick={() => setSelectedId(clip.id)} className="block w-full text-left"><div className="relative aspect-video bg-black"><video src={resolveMediaUrl(clip.url) || undefined} muted preload="metadata" className="h-full w-full object-cover opacity-80" /><span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 text-[9px] text-white">{formatTime(clip.duration)}</span></div><div className="truncate px-1.5 py-1 text-[10px] text-zinc-400 group-hover:text-white">{clip.title}</div></button><button className="block w-full border-t border-white/10 py-1 text-[9px] text-sky-300 hover:bg-sky-500/15" onClick={() => addProjectClip(clip, targetTrackId)}>加入{tracks.find(track => track.id === targetTrackId)?.name || "主视频"}</button></div>)}
@@ -227,7 +259,7 @@ export default function VideoEditorPage() {
 
       <section className="flex min-h-0 flex-col bg-[#0d0f11]">
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/8 px-3"><span className="text-[11px] text-zinc-500">节目监视器</span><div className="flex gap-1"><Button size="icon-xs" variant="ghost" className="text-zinc-500 hover:bg-white/10 hover:text-white" title="适应画布"><ImageIcon /></Button><Button size="icon-xs" variant="ghost" className="text-zinc-500 hover:bg-white/10 hover:text-white" title="显示设置"><Settings2 /></Button></div></div>
-        <div className="flex min-h-0 flex-1 items-center justify-center p-5"><div className="relative aspect-video max-h-full w-full max-w-4xl bg-black shadow-[0_18px_60px_rgba(0,0,0,.5)]"><video ref={previewRef} src={selected ? resolveMediaUrl(selected.url) || undefined : undefined} className="h-full w-full object-contain" onPause={() => setPlaying(false)} />{!selected && <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700"><Clapperboard className="mb-3 size-9" /><span className="text-xs">将素材添加到时间线开始剪辑</span></div>}{selected?.stickers?.map((sticker, index) => <span key={`${sticker}-${index}`} className="absolute left-1/2 top-1/2 -translate-x-1/2 bg-black/55 px-3 py-1 text-lg font-semibold text-white">{sticker}</span>)}</div></div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-5"><div className="relative aspect-video max-h-full w-full max-w-4xl bg-black shadow-[0_18px_60px_rgba(0,0,0,.5)]"><video ref={previewRef} src={selected ? resolveMediaUrl(selected.url) || undefined : undefined} className="h-full w-full object-contain" />{!selected && <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700"><Clapperboard className="mb-3 size-9" /><span className="text-xs">将素材添加到时间线开始剪辑</span></div>}{selected?.stickers?.map((sticker, index) => <span key={`${sticker}-${index}`} className="absolute left-1/2 top-1/2 -translate-x-1/2 bg-black/55 px-3 py-1 text-lg font-semibold text-white">{sticker}</span>)}</div></div>
         <div className="flex h-12 shrink-0 items-center justify-center gap-3 border-t border-white/8 bg-[#15171a]"><span className="w-20 text-right font-mono text-xs text-sky-400">{formatTime(playhead)}</span><Button size="icon-sm" variant="ghost" className="text-zinc-300 hover:bg-white/10 hover:text-white" title="播放/暂停 (空格)" onClick={play}>{playing ? <Pause /> : <Play className="fill-current" />}</Button><span className="w-20 font-mono text-xs text-zinc-600">{formatTime(total)}</span></div>
       </section>
 
