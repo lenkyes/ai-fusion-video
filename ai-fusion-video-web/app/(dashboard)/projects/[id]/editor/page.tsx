@@ -50,6 +50,7 @@ export default function VideoEditorPage() {
   const playheadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scheduledAudioTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const playingAudioRef = useRef<HTMLAudioElement[]>([]);
+  const playbackSessionRef = useRef(0);
 
   const [episode, setEpisode] = useState<StoryboardEpisode | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -72,6 +73,7 @@ export default function VideoEditorPage() {
   const [redoStack, setRedoStack] = useState<Clip[][]>([]);
 
   const selected = clips.find(clip => clip.id === selectedId) ?? null;
+  const selectedTrack = selected ? tracks.find(track => track.id === selected.trackId) : undefined;
   const total = useMemo(() => Math.max(1, ...tracks.map(track => clips.filter(clip => clip.trackId === track.id).reduce((sum, clip) => sum + clip.duration, 0))), [clips, tracks]);
   const timelineWidth = Math.max(800, Math.ceil(total + 5) * scale);
   const activeTemplate = (project?.properties?.videoTemplateSnapshot as VideoTemplate | undefined) || getVideoTemplate(typeof project?.properties?.videoTemplateId === "string" ? project.properties.videoTemplateId : "");
@@ -123,17 +125,23 @@ export default function VideoEditorPage() {
   }, [clips, settings, storageKey, tracks]);
 
   const stop = useCallback(() => {
+    playbackSessionRef.current += 1;
     if (playTimerRef.current) clearTimeout(playTimerRef.current);
     if (playheadTimerRef.current) clearInterval(playheadTimerRef.current);
     scheduledAudioTimersRef.current.forEach(timer => clearTimeout(timer));
     scheduledAudioTimersRef.current = [];
-    previewRef.current?.pause();
+    if (previewRef.current) {
+      previewRef.current.onloadedmetadata = null;
+      previewRef.current.onended = null;
+      previewRef.current.pause();
+    }
     playingAudioRef.current.forEach(audio => { audio.pause(); audio.src = ""; });
     playingAudioRef.current = [];
     setPlaying(false);
   }, []);
   const play = useCallback(() => {
     if (playing) { stop(); return; }
+    const sessionId = ++playbackSessionRef.current;
     const videoTrack = tracks.find(track => track.type === "video" && !track.muted && clips.some(clip => clip.trackId === track.id && clip.url));
     const sequence = videoTrack ? clips.filter(clip => clip.trackId === videoTrack.id && clip.url) : [];
     if (!sequence.length || !previewRef.current) return;
@@ -150,9 +158,14 @@ export default function VideoEditorPage() {
     const startedAt = performance.now();
 
     const startAudio = (source: { url: string; start: number; volume: number }) => {
+      if (playbackSessionRef.current !== sessionId) return;
       const audio = new Audio(resolveMediaUrl(source.url) || source.url);
       audio.volume = Math.min(1, Math.max(0, source.volume));
-      audio.addEventListener("loadedmetadata", () => { audio.currentTime = Math.min(source.start, Math.max(0, audio.duration - .01)); void audio.play().catch(() => toast.error("音频播放失败，请检查媒体地址")); }, { once: true });
+      audio.addEventListener("loadedmetadata", () => {
+        if (playbackSessionRef.current !== sessionId) return;
+        audio.currentTime = Math.min(source.start, Math.max(0, audio.duration - .01));
+        void audio.play().catch(() => toast.error("音频播放失败，请检查媒体地址"));
+      }, { once: true });
       audio.load();
       playingAudioRef.current.push(audio);
     };
@@ -172,6 +185,7 @@ export default function VideoEditorPage() {
     if (settings.bgmUrl) startAudio({ url: settings.bgmUrl, start: startPosition, volume: settings.bgmVolume });
 
     const playNext = () => {
+      if (playbackSessionRef.current !== sessionId) return;
       const clip = sequence[index];
       if (!clip || !previewRef.current) { setPlayhead(0); stop(); return; }
       const video = previewRef.current;
@@ -182,8 +196,10 @@ export default function VideoEditorPage() {
       const offsetInClip = index === startIndex ? initialClipOffset : 0;
       setPlayhead(elapsed + offsetInClip);
       video.onloadedmetadata = () => {
+        if (playbackSessionRef.current !== sessionId) return;
         video.currentTime = Math.min(clip.sourceStart + offsetInClip, Math.max(0, video.duration - .01));
         void video.play().then(() => {
+          if (playbackSessionRef.current !== sessionId) { video.pause(); return; }
           const remaining = clip.duration - offsetInClip;
           playTimerRef.current = setTimeout(() => { elapsed += clip.duration; index += 1; playNext(); }, remaining * 1000);
         }).catch(() => { stop(); toast.error("视频播放失败，请检查媒体地址或格式"); });
@@ -280,7 +296,7 @@ export default function VideoEditorPage() {
   if (loading) return <div className="flex h-[80vh] items-center justify-center bg-[#111315]"><Loader2 className="size-6 animate-spin text-white" /></div>;
   if (!episodeId) return <div className="p-8 text-sm text-muted-foreground">缺少有效的 episodeId。</div>;
 
-  return <div className="flex h-[calc(100vh-4rem)] min-h-[680px] flex-col overflow-hidden bg-[#111315] text-zinc-200">
+  return <div className="flex h-[calc(100dvh-4rem)] min-h-0 flex-col overflow-hidden bg-[#111315] text-zinc-200">
     <header className="flex h-12 shrink-0 items-center border-b border-white/10 bg-[#191b1f] px-2">
       <Button variant="ghost" size="icon-sm" className="text-zinc-300 hover:bg-white/10 hover:text-white" title="返回分镜" onClick={() => router.push(`/projects/${params.id}/storyboards`)}><ArrowLeft /></Button>
       <div className="mx-2 h-5 w-px bg-white/10" />
@@ -307,7 +323,7 @@ export default function VideoEditorPage() {
 
       <section className="flex min-h-0 flex-col bg-[#0d0f11]">
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/8 px-3"><span className="text-[11px] text-zinc-500">节目监视器</span><div className="flex gap-1"><Button size="icon-xs" variant="ghost" className="text-zinc-500 hover:bg-white/10 hover:text-white" title="适应画布"><ImageIcon /></Button><Button size="icon-xs" variant="ghost" className="text-zinc-500 hover:bg-white/10 hover:text-white" title="显示设置"><Settings2 /></Button></div></div>
-        <div className="flex min-h-0 flex-1 items-center justify-center p-5"><div className="relative aspect-video max-h-full w-full max-w-4xl bg-black shadow-[0_18px_60px_rgba(0,0,0,.5)]"><video ref={previewRef} src={selected ? resolveMediaUrl(selected.url) || undefined : undefined} className="h-full w-full object-contain" />{!selected && <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700"><Clapperboard className="mb-3 size-9" /><span className="text-xs">将素材添加到时间线开始剪辑</span></div>}{selected?.stickers?.map((sticker, index) => <span key={`${sticker}-${index}`} className="absolute left-1/2 top-1/2 -translate-x-1/2 bg-black/55 px-3 py-1 text-lg font-semibold text-white">{sticker}</span>)}</div></div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-5"><div className="relative aspect-video max-h-full w-full max-w-4xl bg-black shadow-[0_18px_60px_rgba(0,0,0,.5)]"><video ref={previewRef} src={selected && selectedTrack?.type !== "audio" ? resolveMediaUrl(selected.url) || undefined : undefined} className="h-full w-full object-contain" />{!selected && <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700"><Clapperboard className="mb-3 size-9" /><span className="text-xs">将素材添加到时间线开始剪辑</span></div>}{selected && selectedTrack?.type === "audio" && <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600"><Music2 className="mb-3 size-9 text-emerald-500" /><span className="max-w-xs truncate text-xs">{selected.title}</span><span className="mt-1 text-[10px]">音频片段已选中，按播放键试听</span></div>}{selected?.stickers?.map((sticker, index) => <span key={`${sticker}-${index}`} className="absolute left-1/2 top-1/2 -translate-x-1/2 bg-black/55 px-3 py-1 text-lg font-semibold text-white">{sticker}</span>)}</div></div>
         <div className="flex h-12 shrink-0 items-center justify-center gap-3 border-t border-white/8 bg-[#15171a]"><span className="w-20 text-right font-mono text-xs text-sky-400">{formatTime(playhead)}</span><Button size="icon-sm" variant="ghost" className="text-zinc-300 hover:bg-white/10 hover:text-white" title="播放/暂停 (空格)" onClick={play}>{playing ? <Pause /> : <Play className="fill-current" />}</Button><span className="w-20 font-mono text-xs text-zinc-600">{formatTime(total)}</span></div>
       </section>
 
@@ -321,7 +337,7 @@ export default function VideoEditorPage() {
       </aside>
     </main>
 
-    <section className="flex h-[300px] shrink-0 flex-col border-t border-white/10 bg-[#141619]">
+    <section className="flex h-[250px] shrink-0 flex-col border-t border-white/10 bg-[#141619]">
       <div className="flex h-10 shrink-0 items-center border-b border-white/10 px-2"><Button size="icon-xs" variant="ghost" title="撤销" disabled={!undoStack.length} onClick={undo} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Undo2 /></Button><Button size="icon-xs" variant="ghost" title="重做" disabled={!redoStack.length} onClick={redo} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Redo2 /></Button><div className="mx-2 h-5 w-px bg-white/10" /><Button size="icon-xs" variant="ghost" title="在播放头分割" disabled={!selected} onClick={split} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Scissors /></Button><Button size="icon-xs" variant="ghost" title="删除" disabled={!selected} onClick={removeSelected} className="text-zinc-400 hover:bg-white/10 hover:text-white"><Trash2 /></Button><div className="mx-2 h-5 w-px bg-white/10" /><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("video")}><Plus />视频轨</Button><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("overlay")}><Layers3 />叠加轨</Button><Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => addTrack("audio")}><Music2 />音频轨</Button><div className="ml-auto flex items-center"><ZoomOut className="size-3.5 text-zinc-600" /><input className="mx-2 w-24 accent-sky-400" type="range" min="24" max="80" value={scale} onChange={event => setScale(+event.target.value)} /><ZoomIn className="size-3.5 text-zinc-600" /><Button size="icon-xs" variant="ghost" title="重置草稿" className="ml-2 text-zinc-500 hover:bg-white/10 hover:text-white" onClick={() => { localStorage.removeItem(storageKey); location.reload(); }}><RotateCcw /></Button></div></div>
       <div ref={timelineScrollRef} className="min-h-0 flex-1 overflow-auto"><div className="relative min-h-full" style={{ width: timelineWidth + 144 }}><div className="sticky left-0 z-30 flex h-6 w-36 items-center border-r border-white/10 bg-[#191b1f] px-3 text-[9px] text-zinc-600">轨道</div><div className="absolute left-36 top-0 h-6 cursor-crosshair border-b border-white/10" style={{ width: timelineWidth }} onPointerDown={event => { stop(); setPlayhead(Math.min(total, Math.max(0, (event.clientX - event.currentTarget.getBoundingClientRect().left) / scale))); }}>{Array.from({ length: Math.ceil(timelineWidth / scale) + 1 }, (_, index) => <span key={index} className="absolute top-0 h-2 border-l border-white/20 pl-1 text-[9px] text-zinc-600" style={{ left: index * scale }}>{index % 5 === 0 ? `${index}s` : ""}</span>)}</div><button type="button" aria-label="拖动播放头" title="拖动播放头" onPointerDown={beginScrub} className="absolute bottom-0 top-0 z-40 w-3 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: 144 + playhead * scale }}><span className="absolute bottom-0 left-1/2 top-0 w-px bg-sky-400" /><span className="absolute left-0 top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-sky-400" /></button>
         <div className="pt-0">{tracks.map(track => { let offset = 0; return <div key={track.id} className="relative flex h-[62px] border-b border-white/8"><div className="sticky left-0 z-30 flex w-36 shrink-0 items-center gap-0.5 border-r border-white/10 bg-[#191b1f] px-2"><TrackIcon type={track.type} /><span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400">{track.name}</span><button title={track.muted ? "取消静音" : "静音"} onClick={() => setTracks(value => value.map(item => item.id === track.id ? { ...item, muted: !item.muted } : item))} className="p-1 text-zinc-600 hover:text-white">{track.muted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}</button><button title={track.locked ? "解锁" : "锁定"} onClick={() => setTracks(value => value.map(item => item.id === track.id ? { ...item, locked: !item.locked } : item))} className="p-1 text-zinc-600 hover:text-white">{track.locked ? <Lock className="size-3" /> : <LockOpen className="size-3" />}</button><button title="添加素材" onClick={() => { setUploadTrackId(track.id); mediaInputRef.current?.click(); }} className="p-1 text-zinc-600 hover:text-white"><Plus className="size-3" /></button>{track.id !== "video-1" && <button title="删除轨道" onClick={() => removeTrack(track)} className="p-1 text-zinc-600 hover:text-red-400"><Trash2 className="size-3" /></button>}</div><div className="relative h-full" style={{ width: timelineWidth }}>{clips.filter(clip => clip.trackId === track.id).map(clip => { const left = offset; const width = Math.max(36, clip.duration * scale - 2); offset += clip.duration * scale; return <div key={clip.id} className={`group absolute top-1 h-[52px] overflow-hidden rounded border ${clipColors[track.type]} ${selectedId === clip.id ? "ring-1 ring-white" : "hover:brightness-125"} ${track.muted ? "opacity-45" : ""}`} style={{ left, width }}><button type="button" onClick={() => selectClip(clip.id)} disabled={track.locked} className="absolute inset-0 w-full text-left"><span className="absolute inset-0 opacity-25">{track.type === "video" && <video src={resolveMediaUrl(clip.url) || undefined} muted className="h-full w-full object-cover" />}</span><span className="relative block truncate px-2 pt-1 pr-6 text-[10px] text-white">{clip.title}</span><span className="relative px-2 text-[9px] text-white/55">{clip.duration.toFixed(1)}s</span></button>{!track.locked && <button type="button" title="移除片段" aria-label={`移除 ${clip.title}`} onClick={() => removeClip(clip.id)} className="absolute right-0.5 top-0.5 z-10 rounded bg-black/55 p-0.5 text-white/60 opacity-0 hover:text-red-300 group-hover:opacity-100"><Trash2 className="size-3" /></button>}</div>})}</div></div>})}</div></div></div>
