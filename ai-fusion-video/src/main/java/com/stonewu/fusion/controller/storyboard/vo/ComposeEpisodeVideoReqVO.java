@@ -30,6 +30,12 @@ public class ComposeEpisodeVideoReqVO {
     @Schema(description = "背景音乐音量，1.0 表示原音量")
     private Double bgmVolume;
 
+    @Schema(description = "成片开头渐入时长，单位秒")
+    private Double fadeInDuration;
+
+    @Schema(description = "成片结尾渐出时长，单位秒")
+    private Double fadeOutDuration;
+
     @Data
     public static class EditorClip {
         @Schema(description = "分镜镜头 ID", requiredMode = Schema.RequiredMode.REQUIRED)

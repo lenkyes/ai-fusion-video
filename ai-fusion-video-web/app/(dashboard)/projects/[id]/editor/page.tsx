@@ -19,11 +19,11 @@ import { useProject } from "../project-context";
 
 type Clip = { id: string; itemId: number; title: string; url: string; sourceStart: number; duration: number; trackId: string; opacity?: number; filter?: string; stickers?: string[]; keyframes?: Array<{ time: number; x: number; y: number; scale: number }> };
 type Track = { id: string; name: string; type: "video" | "overlay" | "audio"; muted: boolean; locked: boolean; volume?: number };
-type Settings = { burnSubtitles: boolean; keepOriginalAudio: boolean; originalAudioVolume: number; bgmUrl: string; bgmVolume: number };
+type Settings = { burnSubtitles: boolean; keepOriginalAudio: boolean; originalAudioVolume: number; bgmUrl: string; bgmVolume: number; fadeInDuration: number; fadeOutDuration: number };
 type Draft = { version: 2; clips: Clip[]; tracks?: Track[]; settings: Settings; templateId?: string; storySeed?: string; updatedAt: string };
 type InspectorTab = "clip" | "audio" | "export";
 
-const defaults: Settings = { burnSubtitles: true, keepOriginalAudio: true, originalAudioVolume: 1, bgmUrl: "", bgmVolume: .25 };
+const defaults: Settings = { burnSubtitles: true, keepOriginalAudio: true, originalAudioVolume: 1, bgmUrl: "", bgmVolume: .25, fadeInDuration: 0, fadeOutDuration: 0 };
 const baseTrack: Track = { id: "video-1", name: "主视频", type: "video", muted: false, locked: false };
 const clipColors: Record<Track["type"], string> = { video: "bg-sky-500/25 border-sky-400/45", overlay: "bg-fuchsia-500/20 border-fuchsia-400/40", audio: "bg-emerald-500/20 border-emerald-400/40" };
 
@@ -49,7 +49,8 @@ export default function VideoEditorPage() {
   const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playheadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scheduledAudioTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const playingAudioRef = useRef<Array<{ audio: HTMLAudioElement; trackId: string }>>([]);
+  const playingAudioRef = useRef<Array<{ audio: HTMLAudioElement; trackId: string; baseVolume: number }>>([]);
+  const videoBaseVolumeRef = useRef(1);
   const playbackSessionRef = useRef(0);
 
   const [episode, setEpisode] = useState<StoryboardEpisode | null>(null);
@@ -109,7 +110,7 @@ export default function VideoEditorPage() {
         const templateSettings = activeTemplate ? { ...defaults, bgmUrl: activeTemplate.audio.bgmUrl || "", bgmVolume: activeTemplate.audio.bgmVolume, originalAudioVolume: activeTemplate.audio.originalAudioVolume } : defaults;
         const nextClips = draft?.clips || initial;
         setEpisode(ep); setClips(nextClips); setTracks(draft?.tracks?.length ? draft.tracks : [baseTrack]);
-        setSettings(draft?.settings || templateSettings); setSavedAt(draft?.updatedAt); setSelectedId(nextClips[0]?.id || null);
+        setSettings(draft?.settings ? { ...templateSettings, ...draft.settings } : templateSettings); setSavedAt(draft?.updatedAt); setSelectedId(nextClips[0]?.id || null);
       } catch { toast.error("编辑工程加载失败"); } finally { setLoading(false); }
     })();
   }, [episodeId, storageKey, activeTemplate]);
@@ -134,6 +135,7 @@ export default function VideoEditorPage() {
       previewRef.current.onloadedmetadata = null;
       previewRef.current.onended = null;
       previewRef.current.pause();
+      previewRef.current.style.opacity = "1";
     }
     playingAudioRef.current.forEach(({ audio }) => { audio.pause(); audio.src = ""; });
     playingAudioRef.current = [];
@@ -168,7 +170,7 @@ export default function VideoEditorPage() {
         void audio.play().catch(() => toast.error("音频播放失败，请检查媒体地址"));
       }, { once: true });
       audio.load();
-      playingAudioRef.current.push({ audio, trackId: source.trackId });
+      playingAudioRef.current.push({ audio, trackId: source.trackId, baseVolume: Math.min(1, Math.max(0, source.volume)) });
     };
     tracks.filter(track => track.type === "audio" && !track.muted).forEach(track => {
       let trackOffset = 0;
@@ -193,6 +195,7 @@ export default function VideoEditorPage() {
       video.src = resolveMediaUrl(clip.url) || "";
       video.muted = !settings.keepOriginalAudio || tracks.find(track => track.id === clip.trackId)?.muted === true;
       video.volume = Math.min(1, Math.max(0, settings.originalAudioVolume * videoTrackVolume));
+      videoBaseVolumeRef.current = video.volume;
       setSelectedId(clip.id);
       const offsetInClip = index === startIndex ? initialClipOffset : 0;
       setPlayhead(elapsed + offsetInClip);
@@ -208,7 +211,15 @@ export default function VideoEditorPage() {
       video.load();
     };
     setPlaying(true);
-    playheadTimerRef.current = setInterval(() => setPlayhead(Math.min(total, startPosition + (performance.now() - startedAt) / 1000)), 100);
+    playheadTimerRef.current = setInterval(() => {
+      const position = Math.min(total, startPosition + (performance.now() - startedAt) / 1000);
+      const fadeIn = settings.fadeInDuration > 0 ? Math.min(1, position / settings.fadeInDuration) : 1;
+      const fadeOut = settings.fadeOutDuration > 0 ? Math.min(1, Math.max(0, total - position) / settings.fadeOutDuration) : 1;
+      const fade = Math.min(fadeIn, fadeOut);
+      if (previewRef.current) { previewRef.current.style.opacity = String(fade); previewRef.current.volume = videoBaseVolumeRef.current * fade; }
+      playingAudioRef.current.forEach(item => { item.audio.volume = item.baseVolume * fade; });
+      setPlayhead(position);
+    }, 100);
     playNext();
   }, [clips, playhead, playing, settings, stop, total, tracks]);
 
@@ -263,8 +274,8 @@ export default function VideoEditorPage() {
   }
   function setTrackVolume(track: Track, volume: number) {
     setTracks(value => value.map(item => item.id === track.id ? { ...item, volume } : item));
-    playingAudioRef.current.filter(item => item.trackId === track.id).forEach(({ audio }) => { audio.volume = Math.min(1, volume); });
-    if (previewRef.current && track.type === "video") previewRef.current.volume = Math.min(1, settings.originalAudioVolume * volume);
+    playingAudioRef.current.filter(item => item.trackId === track.id).forEach(item => { item.baseVolume = Math.min(1, volume); item.audio.volume = item.baseVolume; });
+    if (previewRef.current && track.type === "video") { videoBaseVolumeRef.current = Math.min(1, settings.originalAudioVolume * volume); previewRef.current.volume = videoBaseVolumeRef.current; }
   }
   function addTrack(type: Track["type"]) { const count = tracks.filter(track => track.type === type).length + 1; const label = type === "audio" ? "音频" : type === "overlay" ? "叠加" : "视频"; setTracks(value => [...value, { id: `${type}-${Date.now()}`, name: `${label} ${count}`, type, muted: false, locked: false }]); }
   async function uploadMedia(file?: File) {
@@ -357,7 +368,7 @@ export default function VideoEditorPage() {
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {inspectorTab === "clip" && (selected ? <div className="space-y-5"><InspectorTitle icon={SlidersHorizontal} title="基础" /><Field label="片段名称"><Input value={selected.title} onChange={event => patchSelected({ title: event.target.value })} className="editor-input" /></Field><div className="grid grid-cols-2 gap-2"><Field label="入点"><Input type="number" min="0" step=".1" value={selected.sourceStart} onChange={event => patchSelected({ sourceStart: Math.max(0, +event.target.value) })} className="editor-input" /></Field><Field label="时长"><Input type="number" min=".1" step=".1" value={selected.duration} onChange={event => patchSelected({ duration: Math.max(.1, +event.target.value) })} className="editor-input" /></Field></div><Field label={`不透明度 ${Math.round((selected.opacity ?? 1) * 100)}%`}><input className="w-full accent-sky-400" type="range" min="0" max="1" step=".05" value={selected.opacity ?? 1} onChange={event => patchSelected({ opacity: +event.target.value })} /></Field><Field label="滤镜"><select value={selected.filter || "none"} onChange={event => patchSelected({ filter: event.target.value })} className="h-8 w-full rounded border border-white/10 bg-black/20 px-2 text-xs"><option value="none">无</option><option value="cinematic">电影感</option><option value="warm">暖色回忆</option><option value="cold">冷色</option><option value="mono">黑白</option><option value="vintage">复古胶片</option></select></Field><div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" className="border-white/10 bg-transparent hover:bg-white/10 hover:text-white" onClick={split}><Scissors />分割</Button><Button variant="outline" size="sm" className="border-white/10 bg-transparent hover:bg-white/10 hover:text-white" onClick={duplicate}><Copy />复制</Button></div><Button variant="ghost" size="sm" className="w-full text-red-400 hover:bg-red-500/10 hover:text-red-300" onClick={removeSelected}><Trash2 />删除片段</Button></div> : <div className="py-16 text-center text-xs text-zinc-600">选择时间线片段以调整参数</div>)}
           {inspectorTab === "audio" && <div className="space-y-5"><InspectorTitle icon={Volume2} title="混音" /><Toggle label="保留视频原声" checked={settings.keepOriginalAudio} onChange={checked => setSettings(value => ({ ...value, keepOriginalAudio: checked }))} /><Field label={`原声音量 ${Math.round(settings.originalAudioVolume * 100)}%`}><input className="w-full accent-sky-400" type="range" min="0" max="2" step=".05" value={settings.originalAudioVolume} onChange={event => setSettings(value => ({ ...value, originalAudioVolume: +event.target.value }))} /></Field><div className="border-t border-white/10 pt-4"><div className="mb-3 flex items-center gap-2 text-xs font-medium"><Music2 className="size-4 text-emerald-400" />背景音乐</div><input ref={audioInputRef} hidden type="file" accept="audio/*" onChange={event => void uploadBgm(event.target.files?.[0])} /><Button variant="outline" size="sm" className="w-full border-white/10 bg-transparent hover:bg-white/10 hover:text-white" onClick={() => audioInputRef.current?.click()}><Upload />{settings.bgmUrl ? "替换音乐" : "上传音乐"}</Button></div><Field label={`音乐音量 ${Math.round(settings.bgmVolume * 100)}%`}><input disabled={!settings.bgmUrl} className="w-full accent-emerald-400" type="range" min="0" max="2" step=".05" value={settings.bgmVolume} onChange={event => setSettings(value => ({ ...value, bgmVolume: +event.target.value }))} /></Field></div>}
-          {inspectorTab === "export" && <div className="space-y-5"><InspectorTitle icon={Settings2} title="成片设置" /><Toggle label="烧录字幕" checked={settings.burnSubtitles} onChange={checked => setSettings(value => ({ ...value, burnSubtitles: checked }))} /><div className="space-y-2 rounded border border-white/10 bg-black/15 p-3 text-[11px] text-zinc-500"><div className="flex justify-between"><span>时长</span><span className="text-zinc-300">{formatTime(total)}</span></div><div className="flex justify-between"><span>帧率</span><span className="text-zinc-300">25 FPS</span></div><div className="flex justify-between"><span>片段</span><span className="text-zinc-300">{clips.length}</span></div></div></div>}
+          {inspectorTab === "export" && <div className="space-y-5"><InspectorTitle icon={Settings2} title="成片设置" /><Toggle label="烧录字幕" checked={settings.burnSubtitles} onChange={checked => setSettings(value => ({ ...value, burnSubtitles: checked }))} /><div className="border-t border-white/10 pt-4"><div className="mb-3 text-xs font-medium text-zinc-300">渐入渐出</div><div className="grid grid-cols-2 gap-2"><Field label="开头渐入（秒）"><Input type="number" min="0" max={Math.max(0, total / 2)} step=".1" value={settings.fadeInDuration} onChange={event => setSettings(value => ({ ...value, fadeInDuration: Math.max(0, Math.min(total / 2, +event.target.value)) }))} className="editor-input" /></Field><Field label="结束渐出（秒）"><Input type="number" min="0" max={Math.max(0, total / 2)} step=".1" value={settings.fadeOutDuration} onChange={event => setSettings(value => ({ ...value, fadeOutDuration: Math.max(0, Math.min(total / 2, +event.target.value)) }))} className="editor-input" /></Field></div><p className="mt-2 text-[10px] text-zinc-600">设置为 0 表示关闭，画面和声音同步生效</p></div><div className="space-y-2 rounded border border-white/10 bg-black/15 p-3 text-[11px] text-zinc-500"><div className="flex justify-between"><span>时长</span><span className="text-zinc-300">{formatTime(total)}</span></div><div className="flex justify-between"><span>帧率</span><span className="text-zinc-300">25 FPS</span></div><div className="flex justify-between"><span>片段</span><span className="text-zinc-300">{clips.length}</span></div></div></div>}
         </div>
       </aside>
     </main>

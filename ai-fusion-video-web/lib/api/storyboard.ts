@@ -178,6 +178,8 @@ export interface ComposeEpisodeVideoReq {
   originalAudioVolume?: number;
   bgmUrl?: string;
   bgmVolume?: number;
+  fadeInDuration?: number;
+  fadeOutDuration?: number;
   clips?: Array<{
     itemId: number;
     sourceStart: number;

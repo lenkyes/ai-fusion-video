@@ -44,6 +44,7 @@ import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -181,6 +182,20 @@ public class VideoComposeService {
         List<ComposeClip> available = collectEpisodeComposeClips(episodeId);
         List<ComposeClip> edited = new ArrayList<>();
         List<EditorAudio> editorAudios = new ArrayList<>();
+        String primaryVideoTrackId = requestedClips.stream()
+                .filter(Objects::nonNull)
+                .filter(clip -> !"audio".equalsIgnoreCase(clip.getTrackType()))
+                .map(ComposeEpisodeVideoReqVO.EditorClip::getTrackId)
+                .filter(StringUtils::hasText)
+                .filter("video-1"::equals)
+                .findFirst()
+                .orElseGet(() -> requestedClips.stream()
+                        .filter(Objects::nonNull)
+                        .filter(clip -> "video".equalsIgnoreCase(clip.getTrackType()))
+                        .map(ComposeEpisodeVideoReqVO.EditorClip::getTrackId)
+                        .filter(StringUtils::hasText)
+                        .findFirst()
+                        .orElse(null));
         for (ComposeEpisodeVideoReqVO.EditorClip requested : requestedClips) {
             if (requested == null) {
                 throw new BusinessException("剪辑片段不能为空");
@@ -203,6 +218,9 @@ public class VideoComposeService {
                     }
                     continue;
                 }
+                if (primaryVideoTrackId != null && !primaryVideoTrackId.equals(requested.getTrackId())) {
+                    continue;
+                }
                 edited.add(new ComposeClip(uploaded, sourceUrl,
                         finitePositiveOrZero(requested.getSourceStart()),
                         finiteDuration(requested.getDuration(), DEFAULT_CLIP_DURATION_SECONDS),
@@ -218,6 +236,9 @@ public class VideoComposeService {
             double start = finitePositiveOrZero(requested.getSourceStart());
             double duration = finiteDuration(requested.getDuration(), resolveClipDurationSeconds(source.item()));
             if (!"audio".equalsIgnoreCase(requested.getTrackType())) {
+                if (primaryVideoTrackId != null && !primaryVideoTrackId.equals(requested.getTrackId())) {
+                    continue;
+                }
                 edited.add(new ComposeClip(source.item(), source.videoUrl(), start, duration,
                         !Boolean.TRUE.equals(requested.getTrackMuted()),
                         clampTrackVolume(requested.getTrackVolume())));
@@ -367,13 +388,15 @@ public class VideoComposeService {
             }
 
             Path finalOutput = output;
+            double outputDuration = clips.stream().mapToDouble(ComposeClip::duration).sum();
             boolean shouldBurnSubtitles = options.burnSubtitles() && subtitleFiles.hasSubtitle();
             if (shouldBurnSubtitles || bgmFile != null || !editorAudioFiles.isEmpty()
                     || !options.keepOriginalAudio()
-                    || !isDefaultVolume(options.originalAudioVolume())) {
+                    || !isDefaultVolume(options.originalAudioVolume())
+                    || options.fadeInDuration() > 0 || options.fadeOutDuration() > 0) {
                 Path processed = workDir.resolve("output_processed.mp4");
                 ok = runFfmpegPostProcess(output, shouldBurnSubtitles ? subtitleFiles.assFile() : null,
-                        bgmFile, editorAudioFiles, processed, options);
+                        bgmFile, editorAudioFiles, processed, outputDuration, options);
                 if (!ok || !Files.exists(processed) || Files.size(processed) == 0) {
                     throw new RuntimeException("ffmpeg 后处理失败（字幕/音频混合）");
                 }
@@ -847,7 +870,7 @@ public class VideoComposeService {
     }
 
     private boolean runFfmpegPostProcess(Path input, Path assFile, Path bgmFile,
-                                         List<EditorAudioFile> editorAudioFiles, Path output,
+                                         List<EditorAudioFile> editorAudioFiles, Path output, double outputDuration,
                                          ComposeOptions options) throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add(getFfmpegExecutable());
@@ -870,8 +893,16 @@ public class VideoComposeService {
         boolean burnSubtitles = options.burnSubtitles() && assFile != null && Files.exists(assFile);
         List<String> filters = new ArrayList<>();
 
-        if (burnSubtitles) {
-            filters.add("[0:v]subtitles='" + escapeSubtitlePath(assFile) + "'[outv]");
+        List<String> videoFilters = new ArrayList<>();
+        if (burnSubtitles) videoFilters.add("subtitles='" + escapeSubtitlePath(assFile) + "'");
+        double fadeInDuration = Math.min(options.fadeInDuration(), outputDuration / 2);
+        double fadeOutDuration = Math.min(options.fadeOutDuration(), outputDuration / 2);
+        if (fadeInDuration > 0) videoFilters.add("fade=t=in:st=0:d=" + ffmpegNumber(fadeInDuration));
+        if (fadeOutDuration > 0) videoFilters.add("fade=t=out:st="
+                + ffmpegNumber(Math.max(0, outputDuration - fadeOutDuration)) + ":d=" + ffmpegNumber(fadeOutDuration));
+        boolean processVideo = !videoFilters.isEmpty();
+        if (processVideo) {
+            filters.add("[0:v]" + String.join(",", videoFilters) + "[outv]");
         }
 
         List<String> audioLabels = new ArrayList<>();
@@ -896,11 +927,17 @@ public class VideoComposeService {
         }
         String audioMap = null;
         if (audioLabels.size() == 1) {
-            filters.add(audioLabels.get(0) + "anull[outa]");
-            audioMap = "[outa]";
+            filters.add(audioLabels.get(0) + "anull[basea]");
         } else if (audioLabels.size() > 1) {
             filters.add(String.join("", audioLabels) + "amix=inputs=" + audioLabels.size()
-                    + ":duration=first:dropout_transition=2[outa]");
+                    + ":duration=first:dropout_transition=2[basea]");
+        }
+        if (!audioLabels.isEmpty()) {
+            List<String> audioFades = new ArrayList<>();
+            if (fadeInDuration > 0) audioFades.add("afade=t=in:st=0:d=" + ffmpegNumber(fadeInDuration));
+            if (fadeOutDuration > 0) audioFades.add("afade=t=out:st="
+                    + ffmpegNumber(Math.max(0, outputDuration - fadeOutDuration)) + ":d=" + ffmpegNumber(fadeOutDuration));
+            filters.add("[basea]" + (audioFades.isEmpty() ? "anull" : String.join(",", audioFades)) + "[outa]");
             audioMap = "[outa]";
         }
 
@@ -910,7 +947,7 @@ public class VideoComposeService {
         }
 
         cmd.add("-map");
-        cmd.add(burnSubtitles ? "[outv]" : "0:v");
+        cmd.add(processVideo ? "[outv]" : "0:v");
         if (audioMap != null) {
             cmd.add("-map");
             cmd.add(audioMap);
@@ -926,6 +963,8 @@ public class VideoComposeService {
         cmd.add("veryfast");
         cmd.add("-pix_fmt");
         cmd.add("yuv420p");
+        cmd.add("-t");
+        cmd.add(ffmpegNumber(outputDuration));
         cmd.add(output.toString());
         return runFfmpeg(cmd, "post-process", 30);
     }
@@ -1499,6 +1538,8 @@ public class VideoComposeService {
                                         double originalAudioVolume,
                                         String bgmUrl,
                                         double bgmVolume,
+                                        double fadeInDuration,
+                                        double fadeOutDuration,
                                         List<EditorAudio> editorAudios) {
         public static ComposeOptions defaults() {
             return new ComposeOptions(
@@ -1508,6 +1549,8 @@ public class VideoComposeService {
                     DEFAULT_ORIGINAL_AUDIO_VOLUME,
                     null,
                     DEFAULT_BGM_VOLUME,
+                    0,
+                    0,
                     List.of()
             );
         }
@@ -1524,6 +1567,8 @@ public class VideoComposeService {
                     clampVolume(reqVO.getOriginalAudioVolume(), defaults.originalAudioVolume()),
                     trimToNull(reqVO.getBgmUrl()),
                     clampVolume(reqVO.getBgmVolume(), defaults.bgmVolume()),
+                    clampFadeDuration(reqVO.getFadeInDuration()),
+                    clampFadeDuration(reqVO.getFadeOutDuration()),
                     List.of()
             );
         }
@@ -1546,9 +1591,15 @@ public class VideoComposeService {
             return value.trim();
         }
 
+        private static double clampFadeDuration(Double value) {
+            if (value == null || !Double.isFinite(value)) return 0;
+            return Math.max(0, Math.min(60, value));
+        }
+
         public ComposeOptions withEditorAudios(List<EditorAudio> audios) {
             return new ComposeOptions(generateSubtitleFiles, burnSubtitles, keepOriginalAudio,
-                    originalAudioVolume, bgmUrl, bgmVolume, List.copyOf(audios));
+                    originalAudioVolume, bgmUrl, bgmVolume, fadeInDuration, fadeOutDuration,
+                    List.copyOf(audios));
         }
     }
 
