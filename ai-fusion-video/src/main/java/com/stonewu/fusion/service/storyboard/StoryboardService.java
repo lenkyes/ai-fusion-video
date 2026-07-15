@@ -113,9 +113,13 @@ public class StoryboardService {
         return episodeMapper.selectById(episode.getId());
     }
 
-    @CacheEvict(value = "storyboardEpisode", allEntries = true)
+    @CacheEvict(value = { "storyboardEpisode", "storyboardScene", "storyboardItem" }, allEntries = true)
     @Transactional
     public void deleteEpisode(Long id) {
+        itemMapper.delete(new LambdaQueryWrapper<StoryboardItem>()
+                .eq(StoryboardItem::getStoryboardEpisodeId, id));
+        sceneMapper.delete(new LambdaQueryWrapper<StoryboardScene>()
+                .eq(StoryboardScene::getEpisodeId, id));
         episodeMapper.deleteById(id);
     }
 

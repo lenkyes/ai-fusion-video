@@ -23,6 +23,7 @@ import {
   Music,
   FileText,
   Scissors,
+  RefreshCw,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { VideoPreviewDialog } from "@/components/dashboard/video-preview-dialog";
@@ -51,6 +52,10 @@ import { EditItemAssetsDialog } from "./_components/edit-assets-dialog";
 import { assetApi } from "@/lib/api/asset";
 import { useFullWidth } from "@/lib/hooks/use-layout";
 import { useProject } from "../project-context";
+import {
+  GenerateSingleEpisodeDialog,
+  type SingleEpisodeGenerationTarget,
+} from "./_components/generate-single-episode-dialog";
 
 type ViewMode = "table" | "card";
 
@@ -100,6 +105,7 @@ export default function StoryboardTabPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showGenerateStoryboardDialog, setShowGenerateStoryboardDialog] =
     useState(false);
+  const [showSingleEpisodeDialog, setShowSingleEpisodeDialog] = useState(false);
 
   // 关联资产状态
   const [assetsList, setAssetsList] = useState<import("@/lib/api/asset").AssetWithItems[]>([]);
@@ -793,6 +799,37 @@ export default function StoryboardTabPage() {
     refreshCurrentEpisode,
   ]);
 
+  const handleGenerateSingleEpisode = useCallback(async (target: SingleEpisodeGenerationTarget) => {
+    if (!storyboard || storyboard.scriptId == null) {
+      throw new Error("当前分镜未关联剧本");
+    }
+    if (target.existingStoryboardEpisodeId) {
+      await storyboardApi.deleteEpisode(target.existingStoryboardEpisodeId);
+    }
+    const episode = target.scriptEpisode;
+    const pipelineId = addPipeline({
+      label: `补生成分镜 · 第 ${episode.episodeNumber} 集`,
+      projectId,
+      request: {
+        agentType: "episode_storyboard_writer",
+        category: "pipeline",
+        title: `补生成分镜 · 第 ${episode.episodeNumber} 集`,
+        projectId,
+        message: `请仅为剧本分集 ID ${episode.id}（第 ${episode.episodeNumber} 集）生成完整分镜。`,
+        context: {
+          scriptId: storyboard.scriptId,
+          storyboardId: storyboard.id,
+          scriptEpisodeId: episode.id,
+          storyboardMode: "regular",
+          shotDuration: 5,
+        },
+      },
+      onComplete: refreshStoryboardData,
+    });
+    setPanelExpanded(true);
+    setExpandedTaskId(pipelineId);
+  }, [addPipeline, projectId, refreshStoryboardData, setExpandedTaskId, setPanelExpanded, storyboard]);
+
   /** 提交当前场次合成视频任务 */
   const handleComposeSceneVideo = useCallback(async (scene: StoryboardScene) => {
     if (
@@ -1043,6 +1080,15 @@ export default function StoryboardTabPage() {
             </h2>
           </div>
           <div className="flex items-center gap-2">
+            {storyboard.scriptId != null && <button
+              type="button"
+              onClick={() => setShowSingleEpisodeDialog(true)}
+              className="hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/40 bg-muted/20 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/50"
+              title="补生成缺失的单集分镜"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              补生成单集
+            </button>}
             {currentEpisodeId && (
               <Link
                 href={`/projects/${projectId}/editor?episodeId=${currentEpisodeId}`}
@@ -1620,6 +1666,13 @@ export default function StoryboardTabPage() {
           )}
         </div>
       </motion.div>
+      {storyboard.scriptId != null && <GenerateSingleEpisodeDialog
+        open={showSingleEpisodeDialog}
+        scriptId={storyboard.scriptId}
+        storyboardId={storyboard.id}
+        onClose={() => setShowSingleEpisodeDialog(false)}
+        onConfirm={handleGenerateSingleEpisode}
+      />}
 
       {/* 右栏：引用信息 */}
       <motion.div variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] } } }} className="shrink-0 hidden 2xl:block">
