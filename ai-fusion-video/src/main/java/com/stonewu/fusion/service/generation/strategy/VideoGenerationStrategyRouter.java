@@ -92,14 +92,15 @@ public class VideoGenerationStrategyRouter {
             return normalizedPlatform;
         }
 
-        if (isOpenAiCompatibleSeedanceGateway(metadata) && candidates.containsKey("newapi")) {
+        if (isOpenAiCompatibleNewApiVideoGateway(metadata) && candidates.containsKey("newapi")) {
             return "newapi";
         }
         return normalizedPlatform;
     }
 
-    private boolean isOpenAiCompatibleSeedanceGateway(AiModelMetadata metadata) {
-        if (metadata == null || !"seedance".equals(metadata.effectiveFamily())) {
+    private boolean isOpenAiCompatibleNewApiVideoGateway(AiModelMetadata metadata) {
+        if (metadata == null || !("seedance".equals(metadata.effectiveFamily())
+                || "grok_imagine".equals(metadata.effectiveFamily()))) {
             return false;
         }
         String platform = metadata.normalizedPlatform();

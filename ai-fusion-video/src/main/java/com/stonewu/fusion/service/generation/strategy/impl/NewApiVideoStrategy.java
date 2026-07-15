@@ -229,7 +229,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                     || "success".equals(normalizedStatus) || "done".equals(normalizedStatus)) {
                 return result;
             }
-            if ("failed".equals(normalizedStatus) || "error".equals(normalizedStatus)
+            if ("fail".equals(normalizedStatus) || "failed".equals(normalizedStatus) || "error".equals(normalizedStatus)
                     || "canceled".equals(normalizedStatus) || "cancelled".equals(normalizedStatus)) {
                 throw new BusinessException("New API 视频任务失败: "
                         + StrUtil.blankToDefault(result.errorMessage(), "未知错误"));
@@ -515,7 +515,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
     }
 
     private String defaultSubmitPath(AiModelMetadata metadata) {
-        if (metadata != null && ("seedance".equals(metadata.effectiveFamily())
+        if (metadata != null && (("seedance".equals(metadata.effectiveFamily())
+                || "grok_imagine".equals(metadata.effectiveFamily()))
                 || "seedance".equals(metadata.effectiveProtocol()))) {
             return CONTENT_GENERATION_TASKS_PATH;
         }

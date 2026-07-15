@@ -121,6 +121,9 @@ public class AiModelMetadataResolver {
         if (containsAny(corpus, "sora")) {
             return "sora";
         }
+        if (containsAny(corpus, "grok-imagine", "grok_imagine")) {
+            return "grok_imagine";
+        }
         if (containsAny(corpus, "seedance", "豆包视频", "doubao-video")) {
             return "seedance";
         }
@@ -169,7 +172,7 @@ public class AiModelMetadataResolver {
             case "dashscope" -> "wan";
             case "volcengine" -> "seedance";
             case "newapi" -> switch (StrUtil.blankToDefault(family, "generic")) {
-                case "jimeng", "kling", "seedance", "sora" -> family;
+                case "grok_imagine", "jimeng", "kling", "seedance", "sora" -> family;
                 default -> "generic";
             };
             default -> StrUtil.blankToDefault(family, "generic");

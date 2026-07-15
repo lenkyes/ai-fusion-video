@@ -42,6 +42,17 @@ class NewApiVideoStrategyTests {
     }
 
     @Test
+    void shouldUseContentGenerationTaskPathsForGrokImagine() {
+        ApiConfig apiConfig = ApiConfig.builder().apiUrl("http://localhost:8080").build();
+        AiModelMetadata metadata = new AiModelMetadata("newapi", "newapi", "grok_imagine", "grok_imagine");
+
+        assertEquals("http://localhost:8080/api/v3/contents/generations/tasks",
+                strategy.resolveSubmitUrl(apiConfig, new JSONObject(), metadata));
+        assertEquals("http://localhost:8080/api/v3/contents/generations/tasks/task-123",
+                strategy.resolveQueryUrl(apiConfig, new JSONObject(), metadata, "task-123"));
+    }
+
+    @Test
     void shouldAvoidDuplicatingApiV3WhenBaseUrlAlreadyContainsApiV3() {
         ApiConfig apiConfig = ApiConfig.builder()
                 .apiUrl("http://localhost:8080/api/v3")
