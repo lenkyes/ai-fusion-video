@@ -20,6 +20,7 @@ import com.stonewu.fusion.service.ai.AiToolConfigService;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.ai.StoryboardDurationContext;
+import com.stonewu.fusion.service.script.ScriptService;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -77,6 +78,7 @@ public class AgentScopeAssistantService {
     private final StringRedisTemplate stringRedisTemplate;
     private final AiStreamRedisService aiStreamRedisService;
     private final javax.sql.DataSource dataSource;
+    private final ScriptService scriptService;
 
     @Value("${app.ai.agent-tool-timeout-minutes:130}")
     private long agentToolTimeoutMinutes;
@@ -152,6 +154,7 @@ public class AgentScopeAssistantService {
         String conversationId = StrUtil.blankToDefault(reqVO.getConversationId(), IdUtil.fastSimpleUUID());
         String messageId = IdUtil.fastSimpleUUID();
         String mainAgentName = "ai_assistant_agent";
+        Long parsingScriptId = resolveParsingScriptId(reqVO);
 
         // 新一轮执行开始前清理上一次取消留下的 Redis 标志，避免误伤新的同会话请求。
         clearCancelFlag(conversationId);
@@ -170,6 +173,10 @@ public class AgentScopeAssistantService {
                     .ownerId(userId)
                     .requestContext(copyRequestContext(reqVO.getContext()))
                     .build();
+
+            if (parsingScriptId != null) {
+                scriptService.updateParsingStatus(parsingScriptId, 1, "AI 正在解析剧本");
+            }
 
             // 4. 创建事件 Sink（用于 Hook 推送事件）
             Sinks.Many<AiChatStreamRespVO> eventSink = Sinks.many().multicast()
@@ -360,6 +367,7 @@ public class AgentScopeAssistantService {
                             finalStatus = "completed";
                         }
                         conversationService.finish(conversationId, finalStatus);
+                        finishScriptParsing(parsingScriptId, "completed".equals(finalStatus), finalStatus);
                     })
                         .onErrorResume(e -> Mono.empty())
                         .subscribe();
@@ -371,6 +379,7 @@ public class AgentScopeAssistantService {
         } catch (Throwable e) {
             activeStreamingHooks.remove(conversationId);
             log.error("[AgentScope:stream] 初始化失败", e);
+            finishScriptParsing(parsingScriptId, false, "failed");
             try {
                 conversationService.finish(conversationId, "failed");
                 aiStreamRedisService.markError(conversationId);
@@ -1021,6 +1030,39 @@ public class AgentScopeAssistantService {
     private Duration resolveToolExecutionTimeout() {
         long minutes = agentToolTimeoutMinutes > 0 ? agentToolTimeoutMinutes : 130;
         return Duration.ofMinutes(minutes);
+    }
+
+    private Long resolveParsingScriptId(AiChatReqVO reqVO) {
+        if (!("script_full_parse".equals(reqVO.getAgentType())
+                || "story_to_script".equals(reqVO.getAgentType()))
+                || reqVO.getContext() == null) {
+            return null;
+        }
+        Object scriptId = reqVO.getContext().get("scriptId");
+        if (scriptId instanceof Number number) {
+            return number.longValue();
+        }
+        if (scriptId instanceof String value && StrUtil.isNotBlank(value)) {
+            try {
+                return Long.valueOf(value);
+            } catch (NumberFormatException e) {
+                log.warn("剧本解析上下文中的 scriptId 非法: {}", value);
+            }
+        }
+        return null;
+    }
+
+    private void finishScriptParsing(Long scriptId, boolean succeeded, String finalStatus) {
+        if (scriptId == null) {
+            return;
+        }
+        Schedulers.boundedElastic().schedule(() -> {
+            try {
+                scriptService.finishParsing(scriptId, succeeded, "解析未完成：流水线状态为 " + finalStatus);
+            } catch (Exception e) {
+                log.error("回写剧本解析状态失败: scriptId={}, status={}", scriptId, finalStatus, e);
+            }
+        });
     }
 
     private void clearCancelFlag(String conversationId) {

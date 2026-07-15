@@ -288,6 +288,7 @@ public class GenerationModelCapabilityService {
         String platform = metadata.platform();
         JSONObject config = getMergedModelConfig(model);
         VideoModelCapability capability = resolveVideoCapability(model, platform);
+        boolean grokImagine = "grok_imagine".equals(metadata.effectiveFamily());
 
         return JSONUtil.createObj()
                 .set("configured", true)
@@ -314,6 +315,10 @@ public class GenerationModelCapabilityService {
                 .set("maxDuration", getInteger(config, "maxDuration"))
                 .set("defaultDuration", getInteger(config, "defaultDuration"))
                 .set("supportCameraFixed", getBoolean(config, "supportCameraFixed"))
+                .set("promptProfile", grokImagine ? "grok_imagine_1_5" : "default")
+                .set("promptGuidance", grokImagine
+                        ? "Grok Imagine 1.5 使用简洁、直接的镜头指令：一个主事件，按时间顺序描述动作、摄影和时间安排，只使用一种明确运镜，并写清物理运动和稳定终态。最多支持 7 张输入图，必须按实际发送顺序使用 @image1、@image2 等引用；不要使用资产 ID、长负面词或多段风格堆叠。"
+                        : null)
                 .set("summary", describeVideoCapability(model));
     }
 
@@ -356,6 +361,11 @@ public class GenerationModelCapabilityService {
         String normalizedPlatform = metadata.normalizedPlatform();
         String code = model != null && StrUtil.isNotBlank(model.getCode())
                 ? model.getCode().toLowerCase(Locale.ROOT) : "";
+
+        if ("grok_imagine".equals(metadata.effectiveFamily())) {
+            return new VideoModelCapability(true, false, true, false, false,
+                    0, 7, 7, 0, 0);
+        }
 
         if ("seedance".equals(metadata.effectiveFamily())) {
             VideoModelCapability seedanceCapability = inferSeedanceVideoCapability(code);

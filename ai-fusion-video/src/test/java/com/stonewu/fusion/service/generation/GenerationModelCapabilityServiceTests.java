@@ -32,6 +32,49 @@ class GenerationModelCapabilityServiceTests {
         }
 
     @Test
+    void shouldExposeGrokImaginePromptProfileAndSevenImageCapability() {
+        AiModel model = AiModel.builder()
+                .name("Grok Imagine Video 1.5 Preview")
+                .code("grok-imagine-video-1-5-preview")
+                .modelType(3)
+                .build();
+
+        var capability = service.resolveVideoCapability(model, "openai_compatible");
+
+        assertTrue(capability.supportsFirstFrame());
+        assertFalse(capability.supportsLastFrame());
+        assertTrue(capability.supportsReferenceImages());
+        assertEquals(7, capability.maxImageInputs());
+        assertEquals(7, capability.maxReferenceImages());
+
+        var snapshot = service.buildVideoCapabilitySnapshot(model);
+        assertEquals("grok_imagine", snapshot.getStr("modelFamily"));
+        assertEquals("grok_imagine_1_5", snapshot.getStr("promptProfile"));
+        assertTrue(snapshot.getStr("promptGuidance").contains("@image1"));
+
+        List<String> sixReferences = List.of(
+                "https://example.com/1.png", "https://example.com/2.png",
+                "https://example.com/3.png", "https://example.com/4.png",
+                "https://example.com/5.png", "https://example.com/6.png");
+        VideoTask validTask = VideoTask.builder()
+                .firstFrameImageUrl("https://example.com/first.png")
+                .referenceImageUrls(JSONUtil.toJsonStr(sixReferences))
+                .build();
+        service.validateVideoTask(model, validTask, "openai_compatible");
+
+        VideoTask tooManyImagesTask = VideoTask.builder()
+                .firstFrameImageUrl("https://example.com/first.png")
+                .referenceImageUrls(JSONUtil.toJsonStr(List.of(
+                        "https://example.com/1.png", "https://example.com/2.png",
+                        "https://example.com/3.png", "https://example.com/4.png",
+                        "https://example.com/5.png", "https://example.com/6.png",
+                        "https://example.com/7.png")))
+                .build();
+        assertThrows(BusinessException.class,
+                () -> service.validateVideoTask(model, tooManyImagesTask, "openai_compatible"));
+    }
+
+    @Test
     void shouldUsePresetReferenceImageCapabilityForSupportedOpenAiImageModels() {
         List<String> supportedCodes = List.of("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-2");
 

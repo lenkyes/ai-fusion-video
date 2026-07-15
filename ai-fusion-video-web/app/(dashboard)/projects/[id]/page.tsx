@@ -234,9 +234,9 @@ export default function ProjectOverviewPage() {
       label: `AI 生成剧本 - ${scriptDisplayTitle}`,
       projectId,
       request: {
-        agentType: "script_full_parse",
+        agentType: parseMode === "reparse" ? "script_full_parse" : "story_to_script",
         category: "pipeline",
-        title: `AI 剧本解析：${scriptDisplayTitle}`,
+        title: `${parseMode === "reparse" ? "AI 剧本解析" : "AI 剧本生成"}：${scriptDisplayTitle}`,
         projectId,
         context: { scriptId: script.id },
       },

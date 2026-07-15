@@ -10,6 +10,21 @@ import static org.mockito.Mockito.mock;
 class AiModelMetadataResolverTests {
 
     @Test
+    void shouldInferGrokImagineVideoFamilyAndProtocol() {
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
+        AiModel model = AiModel.builder()
+                .name("Grok Imagine Video 1.5 Preview")
+                .code("grok-imagine-video-1-5-preview")
+                .modelType(3)
+                .build();
+
+        AiModelMetadata metadata = resolver.resolve(model, "openai_compatible");
+
+        assertEquals("grok_imagine", metadata.modelFamily());
+        assertEquals("grok_imagine", metadata.modelProtocol());
+    }
+
+    @Test
     void shouldInferNewApiSpecificProtocolFromFamilyKeywords() {
         AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
         AiModel model = AiModel.builder()

@@ -206,9 +206,9 @@ export default function ScriptTabPage() {
         label: `AI 生成剧本 - ${scriptDisplayTitle}`,
         projectId,
         request: {
-          agentType: "script_full_parse",
+          agentType: "story_to_script",
           category: "pipeline",
-          title: `AI 剧本解析：${scriptDisplayTitle}`,
+          title: `AI 剧本生成：${scriptDisplayTitle}`,
           projectId,
           context: { scriptId: createdScript.id },
         },

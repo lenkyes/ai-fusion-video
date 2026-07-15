@@ -93,6 +93,25 @@ public class ScriptService {
 
     @CacheEvict(value = "script", allEntries = true)
     @Transactional
+    public void finishParsing(Long scriptId, boolean succeeded, String failureProgress) {
+        Script script = getById(scriptId);
+        long episodeCount = episodeMapper.selectCount(new LambdaQueryWrapper<ScriptEpisode>()
+                .eq(ScriptEpisode::getScriptId, scriptId));
+        script.setTotalEpisodes(Math.toIntExact(episodeCount));
+        if (succeeded && episodeCount > 0) {
+            script.setParsingStatus(2);
+            script.setParsingProgress("解析完成，共 " + episodeCount + " 集");
+        } else {
+            script.setParsingStatus(3);
+            script.setParsingProgress(episodeCount == 0
+                    ? "解析失败：AI 未生成任何分集记录"
+                    : failureProgress);
+        }
+        scriptMapper.updateById(script);
+    }
+
+    @CacheEvict(value = "script", allEntries = true)
+    @Transactional
     public void delete(Long id) {
         scriptMapper.deleteById(id);
     }
@@ -242,6 +261,11 @@ public class ScriptService {
                     .build();
             episodeMapper.insert(episode);
         }
+        long episodeCount = episodeMapper.selectCount(new LambdaQueryWrapper<ScriptEpisode>()
+                .eq(ScriptEpisode::getScriptId, scriptId));
+        Script script = getById(scriptId);
+        script.setTotalEpisodes(Math.toIntExact(episodeCount));
+        scriptMapper.updateById(script);
         return episode;
     }
 

@@ -21,6 +21,9 @@ class NewApiVideoProtocolSupportTests {
     void shouldBuildGrokImagineWithSeedanceCompatibleBody() {
         VideoTask task = VideoTask.builder().prompt("cinematic shot")
                 .firstFrameImageUrl("https://example.com/first.png")
+                .referenceImageUrls(JSONUtil.toJsonStr(List.of(
+                        "https://example.com/ref-1.png",
+                        "https://example.com/ref-2.png")))
                 .ratio("16:9").resolution("720p").duration(8).build();
         NewApiVideoProtocolContext context = new NewApiVideoProtocolContext(
                 AiModel.builder().code("grok-imagine-video-1-5-preview").build(), null, task,
@@ -32,6 +35,10 @@ class NewApiVideoProtocolSupportTests {
         assertEquals("cinematic shot", content.getJSONObject(0).getStr("text"));
         assertEquals("https://example.com/first.png",
                 content.getJSONObject(1).getJSONObject("image_url").getStr("url"));
+        assertEquals("https://example.com/ref-1.png",
+                content.getJSONObject(2).getJSONObject("image_url").getStr("url"));
+        assertEquals("https://example.com/ref-2.png",
+                content.getJSONObject(3).getJSONObject("image_url").getStr("url"));
         assertEquals("16:9", body.getStr("ratio"));
         assertEquals("720p", body.getStr("resolution"));
         assertEquals(8L, body.getLong("duration"));

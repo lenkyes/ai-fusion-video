@@ -86,7 +86,7 @@ export function ParseScriptDialog({
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-purple-400" />
                   <h2 className="text-lg font-semibold">
-                    {mode === "reparse" ? "重新解析剧本" : "AI 解析剧本"}
+                    {mode === "reparse" ? "重新解析剧本" : "AI 生成剧本"}
                   </h2>
                 </div>
                 <button
@@ -122,12 +122,14 @@ export function ParseScriptDialog({
                 {/* 剧本原文 */}
                 <div>
                   <label className="block text-sm font-medium mb-1.5">
-                    剧本原文 <span className="text-destructive">*</span>
+                    {mode === "reparse" ? "剧本原文" : "故事梗概或创作要求"} <span className="text-destructive">*</span>
                   </label>
                   <textarea
                     value={rawContent}
                     onChange={(e) => setRawContent(e.target.value)}
-                    placeholder="在此粘贴完整的剧本原文，AI 将自动解析为结构化的分集、场次和对白数据..."
+                    placeholder={mode === "reparse"
+                      ? "在此粘贴完整的逐集剧本原文，AI 将解析为结构化的分集、场次和对白数据..."
+                      : "输入故事梗概、题材、目标集数等创作要求，AI 将生成完整的分集、场次和对白..."}
                     rows={10}
                     className={cn(
                       "w-full px-3.5 py-2.5 rounded-xl text-sm resize-none",
