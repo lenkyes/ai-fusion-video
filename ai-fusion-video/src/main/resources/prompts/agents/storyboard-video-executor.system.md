@@ -7,6 +7,7 @@
 1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `generateAudio`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）。`artStyleInfo.referenceImageUrl` 只可用于理解画风，不得放入视频 `referenceImageUrls`。
 3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。角色引用已由后端按 `appearanceItemId` 解析为该童年/青年/老年/换装形态的专属 canonical 三视图；必须原样使用返回的 `assetItemId`、`canonicalThreeViewItemId` 和 `imageUrl`，禁止在同一主资产下自行搜索或替换为其他三视图。
+4. **处理人工重抽反馈**：输入包含 `videoOptimizationNotes` 时，先读取目标镜头已有 `videoPrompt`，再结合反馈重写本次 prompt。把穿模、肢体异常、人物关系或动作不合理等问题转化为明确、可执行的正向动作、空间位置、接触关系和稳定终态约束；只保留必要的简短负面约束。不得忽略反馈，也不要仅把反馈原文机械追加到旧 prompt 末尾。
    - **排序规则**：优先遵循 `consistencyContext.referenceOrderPolicy`；默认角色（按 assetItemId 升序）→ 场景 → 道具（按 assetItemId 升序），默认最多 5 张。Grok Imagine 1.5 例外：所有图片输入总计最多 7 张；有首帧时 `referenceImageUrls` 最多 6 张，无首帧时最多 7 张。不要把 `/api/art-styles/**`、`/art-styles/**` 或项目预设画风图放入 `referenceImageUrls`。
    - 同一 `appearanceItemId` 在不同镜头中必须使用同一个 canonical assetItemId、同一张 imageUrl 和同一套外观描述，不要因为镜头不同切换年龄、换装或改写成另一个人/另一个场景。
 4. **识别对白与声音**：按规则将镜头中的 `dialogue` 转写为对白格式，融入 prompt；当 `generateAudio` 不为 false 时，同时把 `sound`、`soundEffect`、`music` 中可执行的环境声、音效和配乐意图写入 prompt。

@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Video, X, ImageIcon, Check, Film, FileText, Volume2 } from "lucide-react";
+import { Video, X, ImageIcon, Check, Film, FileText, Volume2, MessageSquareWarning } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
 import type { StoryboardItem } from "@/lib/api/storyboard";
+import { Textarea } from "@/components/ui/textarea";
 
 interface VideoGenDialogProps {
   open: boolean;
@@ -13,7 +14,7 @@ interface VideoGenDialogProps {
   items: StoryboardItem[];
   onConfirm: (
     selectedItemIds: number[],
-    options?: { promptOnly?: boolean; generateAudio?: boolean }
+    options?: { promptOnly?: boolean; generateAudio?: boolean; optimizationNotes?: string }
   ) => void;
 }
 
@@ -38,6 +39,7 @@ export function VideoGenDialog({
   );
   const [selectedOverride, setSelectedOverride] = useState<Set<number> | null>(null);
   const [generateAudio, setGenerateAudio] = useState(true);
+  const [optimizationNotes, setOptimizationNotes] = useState("");
   const selected = selectedOverride ?? defaultSelected;
 
   if (!open) return null;
@@ -60,7 +62,11 @@ export function VideoGenDialog({
   };
 
   const handleConfirm = (promptOnly?: boolean) => {
-    onConfirm(Array.from(selected), { promptOnly, generateAudio });
+    onConfirm(Array.from(selected), {
+      promptOnly,
+      generateAudio,
+      optimizationNotes: optimizationNotes.trim() || undefined,
+    });
     onClose();
   };
 
@@ -138,6 +144,26 @@ export function VideoGenDialog({
               className="h-4 w-4 accent-purple-500"
             />
           </label>
+        )}
+
+        {items.length > 0 && (
+          <div className="px-5 py-3 border-b border-border/10 space-y-2">
+            <label htmlFor="video-optimization-notes" className="flex items-center gap-1.5 text-xs font-medium">
+              <MessageSquareWarning className="h-3.5 w-3.5 text-amber-500" />
+              重抽优化说明
+            </label>
+            <Textarea
+              id="video-optimization-notes"
+              value={optimizationNotes}
+              onChange={(event) => setOptimizationNotes(event.target.value)}
+              placeholder="例如：人物手臂穿过桌面，手指变形；重抽时保持双手自然放在桌面上，身体不要与道具重叠。"
+              maxLength={1000}
+              className="min-h-20 resize-y text-xs"
+            />
+            <div className="text-right text-[10px] text-muted-foreground">
+              {optimizationNotes.length}/1000
+            </div>
+          </div>
         )}
 
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0">

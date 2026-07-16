@@ -267,7 +267,7 @@ function SceneAssetPanel({
   /** 批量生视频确认 */
   const handleVideoGenConfirm = (
     selectedItemIds: number[],
-    options?: { promptOnly?: boolean; generateAudio?: boolean }
+    options?: { promptOnly?: boolean; generateAudio?: boolean; optimizationNotes?: string }
   ) => {
     const promptOnly = options?.promptOnly ?? false;
     const generateAudio = options?.generateAudio ?? true;
@@ -298,6 +298,7 @@ function SceneAssetPanel({
           overwriteExistingVideo: true,
           generationRequestId,
           parallelVideoGeneration,
+          videoOptimizationNotes: options?.optimizationNotes,
         },
       },
       onComplete: () => {

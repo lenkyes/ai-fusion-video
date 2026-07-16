@@ -549,6 +549,7 @@ public class AiAgentRegistry {
                                                                                 - generateAudio: true/false（默认 true；上下文提供时原样传递）
                                                                                 - forceRegenerate: true/false（上下文有 forceRegenerate=true、overwriteExistingVideo=true，或用户明确要求重新生成/覆盖时传 true）
                                                                                 - generationRequestId: 本次用户提交的唯一请求ID（若上下文提供则原样传递，禁止编造）
+                                                                                - videoOptimizationNotes: 用户对上一版视频的人工问题反馈（若上下文提供则必须原样传递，供子 Agent 优化提示词）
                                                                                 - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
                                                                                 - 不要把分镜条目ID传给 storyboardSceneId 或 sceneId；生成视频时必须使用 storyboardItemId
