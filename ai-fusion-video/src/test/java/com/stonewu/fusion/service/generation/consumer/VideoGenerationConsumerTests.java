@@ -16,11 +16,46 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class VideoGenerationConsumerTests {
+
+    @Test
+    void submitTaskSerializesGrokVideoRequestsEvenWhenModelConcurrencyIsHigher() {
+        RedisTaskQueue taskQueue = mock(RedisTaskQueue.class);
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        AiModelService aiModelService = mock(AiModelService.class);
+        GenerationModelCapabilityService capabilityService = mock(GenerationModelCapabilityService.class);
+        VideoGenerationStrategyRouter strategyRouter = mock(VideoGenerationStrategyRouter.class);
+        SystemConfigService systemConfigService = mock(SystemConfigService.class);
+
+        AiModel model = AiModel.builder()
+                .id(100L)
+                .code("grok-image-video")
+                .modelType(3)
+                .maxConcurrency(5)
+                .status(1)
+                .build();
+        when(aiModelService.getById(100L)).thenReturn(model);
+        when(capabilityService.isGrokImagineVideoModel(model)).thenReturn(true);
+        when(videoGenerationService.create(any(VideoTask.class))).thenAnswer(invocation -> {
+            VideoTask created = invocation.getArgument(0);
+            created.setId(200L);
+            return created;
+        });
+
+        VideoGenerationConsumer consumer = new VideoGenerationConsumer(
+                taskQueue, videoGenerationService, aiModelService, capabilityService, strategyRouter,
+                mock(MediaStorageService.class), systemConfigService);
+
+        consumer.submitTask(VideoTask.builder().modelId(100L).prompt("test prompt").build());
+
+        verify(taskQueue).setMaxConcurrent("video_generation:model:100", 1);
+        verify(taskQueue, never()).setMaxConcurrent("video_generation:model:100", 5);
+    }
 
     @Test
         void submitTaskDefaultsWatermarkOffAndAudioOnWhenUnset() {

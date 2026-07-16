@@ -20,6 +20,35 @@ import static org.mockito.Mockito.when;
 class GetStoryboardSceneItemsToolExecutorTests {
 
     @Test
+    void itemQueryReturnsOnlyPreviousCurrentAndNextShot() {
+        StoryboardService storyboardService = mock(StoryboardService.class);
+        AssetService assetService = mock(AssetService.class);
+        StoryboardScene scene = StoryboardScene.builder().id(486L).sceneHeading("1-1").build();
+        List<StoryboardItem> items = java.util.stream.LongStream.rangeClosed(1, 9)
+                .mapToObj(id -> StoryboardItem.builder()
+                        .id(id)
+                        .storyboardSceneId(486L)
+                        .sortOrder((int) id)
+                        .build())
+                .toList();
+        when(storyboardService.getItemById(5L)).thenReturn(items.get(4));
+        when(storyboardService.getSceneById(486L)).thenReturn(scene);
+        when(storyboardService.listItemsByScene(486L)).thenReturn(items);
+
+        GetStoryboardSceneItemsToolExecutor executor =
+                new GetStoryboardSceneItemsToolExecutor(storyboardService, assetService);
+
+        JSONObject result = JSONUtil.parseObj(executor.execute("{\"storyboardItemId\":5}",
+                ToolExecutionContext.builder().userId(1L).build()));
+
+        assertThat(result.getInt("totalItems")).isEqualTo(3);
+        assertThat(result.getStr("fallbackMode")).isEqualTo("target_context");
+        assertThat(result.getJSONArray("items").stream()
+                .map(value -> ((JSONObject) value).getLong("id")))
+                .containsExactly(4L, 5L, 6L);
+    }
+
+    @Test
     void treatsSceneIdAsStoryboardItemIdWhenModelPassesWrongField() {
         StoryboardService storyboardService = mock(StoryboardService.class);
         AssetService assetService = mock(AssetService.class);

@@ -337,6 +337,15 @@ public class GenerationModelCapabilityService {
         return aiModelMetadataResolver.resolvePlatform(model);
     }
 
+    public boolean isGrokImagineVideoModel(AiModel model) {
+        if (model == null || model.getModelType() == null || model.getModelType() != 3) {
+            return false;
+        }
+        AiModelMetadata metadata = aiModelMetadataResolver.resolve(model);
+        return "grok_imagine".equals(metadata.effectiveFamily())
+                || "grok_imagine".equals(metadata.effectiveProtocol());
+    }
+
     private ImageModelCapability inferImageCapability(AiModel model, AiModelMetadata metadata) {
         String normalizedPlatform = metadata.normalizedPlatform();
         String code = model != null && StrUtil.isNotBlank(model.getCode())

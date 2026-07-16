@@ -175,7 +175,8 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
                 return buildFallbackItemsResult(targetItem, appendWarning(
                         "关联场次列表中没有目标镜头，已降级为按镜头上下文查询", warning));
             }
-            return buildItemsResult(scene, targetItem.getId(), items, null, warning);
+            return buildItemsResult(scene, targetItem.getId(), contextWindow(items, targetItem.getId()),
+                    "target_context", warning);
         } catch (Exception sceneError) {
             log.warn("[get_storyboard_scene_items] 目标镜头关联场次查询失败，降级按镜头上下文返回: storyboardItemId={}, storyboardSceneId={}, reason={}",
                     targetItem.getId(), storyboardSceneId, sceneError.getMessage());
@@ -232,8 +233,8 @@ public class GetStoryboardSceneItemsToolExecutor implements ToolExecutor {
         if (targetIndex < 0) {
             return List.of();
         }
-        int from = Math.max(0, targetIndex - 3);
-        int to = Math.min(items.size(), targetIndex + 4);
+        int from = Math.max(0, targetIndex - 1);
+        int to = Math.min(items.size(), targetIndex + 2);
         return new ArrayList<>(items.subList(from, to));
     }
 

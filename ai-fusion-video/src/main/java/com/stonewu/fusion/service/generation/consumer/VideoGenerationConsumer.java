@@ -414,6 +414,10 @@ public class VideoGenerationConsumer {
 
     private int resolveQueueMaxConcurrent(Long modelId) {
         AiModel model = resolveQueueModel(modelId);
+        // Grok video gateways commonly accept queued jobs but reject concurrent submissions.
+        if (generationModelCapabilityService.isGrokImagineVideoModel(model)) {
+            return 1;
+        }
         Integer configured = model != null ? model.getMaxConcurrency() : null;
         return configured != null && configured > 0 ? configured : 1;
     }
