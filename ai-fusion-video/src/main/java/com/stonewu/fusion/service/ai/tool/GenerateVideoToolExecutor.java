@@ -15,7 +15,6 @@ import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.stonewu.fusion.service.generation.VideoGenerationService;
-import com.stonewu.fusion.service.generation.VideoTailFrameService;
 import com.stonewu.fusion.service.generation.consumer.VideoGenerationConsumer;
 import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategyRouter;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
@@ -23,7 +22,6 @@ import com.stonewu.fusion.service.system.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -56,9 +54,6 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
     private final VideoGenerationStrategyRouter videoGenerationStrategyRouter;
     private final SystemConfigService systemConfigService;
     private final StoryboardService storyboardService;
-    @Autowired(required = false)
-    private VideoTailFrameService videoTailFrameService;
-
     @Value("${app.generation.video.agent-tool-wait-timeout-ms:7200000}")
     private long waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
 
@@ -320,15 +315,6 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             if (videoItem == null) {
                 return errorResult("生成完成但未获取到视频 URL");
-            }
-
-            if (StrUtil.isBlank(videoItem.getLastFrameUrl()) && videoTailFrameService != null) {
-                String accessibleVideoUrl = resolvePublicMediaUrl(videoItem.getVideoUrl(), "generatedVideoUrl");
-                String extractedTailFrame = videoTailFrameService.extractAndStore(accessibleVideoUrl);
-                if (StrUtil.isNotBlank(extractedTailFrame)) {
-                    videoItem.setLastFrameUrl(extractedTailFrame);
-                    videoGenerationService.updateItem(videoItem);
-                }
             }
 
             persistStoryboardGenerationResult(storyboardItemId, videoItem);
@@ -636,13 +622,6 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 return;
             }
             item.setGeneratedVideoUrl(videoItem.getVideoUrl());
-            if (StrUtil.isNotBlank(videoItem.getLastFrameUrl())) {
-                JSONObject customData = StrUtil.isBlank(item.getCustomData())
-                        ? JSONUtil.createObj()
-                        : JSONUtil.parseObj(item.getCustomData());
-                customData.set("lastFrameImageUrl", videoItem.getLastFrameUrl());
-                item.setCustomData(customData.toString());
-            }
             storyboardService.updateItem(item);
         } catch (Exception e) {
             log.warn("[generate_video] 保存分镜视频连续性信息失败: storyboardItemId={}, reason={}",

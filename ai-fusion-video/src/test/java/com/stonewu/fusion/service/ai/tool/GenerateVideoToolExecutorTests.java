@@ -633,7 +633,7 @@ class GenerateVideoToolExecutorTests {
     }
 
     @Test
-    void shouldUsePreviousShotTailFrameAndVideoAndPersistCurrentTailFrame() throws Exception {
+    void shouldUsePreviousShotReferencesAndPreservePreGeneratedCurrentTailFrame() throws Exception {
         AiModelService aiModelService = mock(AiModelService.class);
         VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
@@ -652,7 +652,7 @@ class GenerateVideoToolExecutorTests {
         StoryboardItem current = StoryboardItem.builder()
                 .id(3310L)
                 .storyboardId(220L)
-                .generatedImageUrl("/media/images/current.png")
+                .customData("{\"lastFrameImageUrl\":\"/media/images/pre-generated-tail.png\"}")
                 .build();
         when(aiModelService.getDefaultByType(3)).thenReturn(model);
         when(strategyRouter.supports(model)).thenReturn(true);
@@ -661,6 +661,8 @@ class GenerateVideoToolExecutorTests {
                         true, true, true, true, false, 0, null, 9, 1, 0));
         when(storyboardService.getItemById(3310L)).thenReturn(current);
         when(storyboardService.listItems(220L)).thenReturn(List.of(previous, current));
+        when(systemConfigService.resolvePublicUrl("/media/images/pre-generated-tail.png"))
+                .thenReturn("https://fusion.test/media/images/pre-generated-tail.png");
         when(systemConfigService.resolvePublicUrl("/media/images/previous-tail.png"))
                 .thenReturn("https://fusion.test/media/images/previous-tail.png");
         when(systemConfigService.resolvePublicUrl("/media/videos/previous.mp4"))
@@ -684,10 +686,13 @@ class GenerateVideoToolExecutorTests {
         verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
         assertThat(taskCaptor.getValue().getFirstFrameImageUrl())
                 .isEqualTo("https://fusion.test/media/images/previous-tail.png");
+        assertThat(taskCaptor.getValue().getLastFrameImageUrl())
+                .isEqualTo("https://fusion.test/media/images/pre-generated-tail.png");
         assertThat(taskCaptor.getValue().getReferenceVideoUrls())
                 .contains("https://fusion.test/media/videos/previous.mp4");
-        assertThat(current.getGeneratedVideoUrl()).endsWith("current.mp4");
-        assertThat(current.getCustomData()).contains("current-tail.png");
         verify(storyboardService).updateItem(current);
+        assertThat(current.getGeneratedVideoUrl()).isEqualTo("https://fusion.test/media/videos/current.mp4");
+        assertThat(current.getCustomData())
+                .isEqualTo("{\"lastFrameImageUrl\":\"/media/images/pre-generated-tail.png\"}");
     }
 }
