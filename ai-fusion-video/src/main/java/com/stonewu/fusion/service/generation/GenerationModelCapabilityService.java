@@ -317,7 +317,7 @@ public class GenerationModelCapabilityService {
                 .set("supportCameraFixed", getBoolean(config, "supportCameraFixed"))
                 .set("promptProfile", grokImagine ? "grok_imagine_1_5" : "default")
                 .set("promptGuidance", grokImagine
-                        ? "Grok Imagine 1.5 使用简洁、直接的镜头指令：一个主事件，按时间顺序描述动作、摄影和时间安排，只使用一种明确运镜，并写清物理运动和稳定终态。最多支持 7 张输入图，必须按实际发送顺序使用 @image1、@image2 等引用；不要使用资产 ID、长负面词或多段风格堆叠。"
+                        ? "Grok Imagine 1.5 使用简洁、直接的镜头指令：一个主事件，按时间顺序描述动作、摄影和时间安排，只使用一种明确运镜，并写清物理运动和稳定终态。多人镜头优先半身或中近景，明确每个人的左右/前后站位、朝向、身高关系和间距，保持自然人体比例与稳定躯干长度，避免多人交叉走位和肢体融合。最多支持 7 张输入图，必须按实际发送顺序使用 @image1、@image2 等引用；不要使用资产 ID、长负面词或多段风格堆叠。"
                         : null)
                 .set("summary", describeVideoCapability(model));
     }
