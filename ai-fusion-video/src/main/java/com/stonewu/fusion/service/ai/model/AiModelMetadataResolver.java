@@ -85,14 +85,16 @@ public class AiModelMetadataResolver {
         if (StrUtil.isBlank(family)) {
             return null;
         }
-        return family.trim().toLowerCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
+        String normalized = family.trim().toLowerCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
+        return normalized.contains("grok") ? "grok_imagine" : normalized;
     }
 
     public String normalizeProtocol(String protocol) {
         if (StrUtil.isBlank(protocol)) {
             return null;
         }
-        return protocol.trim().toLowerCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
+        String normalized = protocol.trim().toLowerCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
+        return normalized.contains("grok") ? "grok_imagine" : normalized;
     }
 
     private Integer inferRemoteModelType(String platform, String modelId, String ownedBy, Integer currentType) {
@@ -121,7 +123,7 @@ public class AiModelMetadataResolver {
         if (containsAny(corpus, "sora")) {
             return "sora";
         }
-        if (containsAny(corpus, "grok-imagine", "grok_imagine")) {
+        if (modelType != null && modelType == 3 && containsAny(corpus, "grok")) {
             return "grok_imagine";
         }
         if (containsAny(corpus, "seedance", "豆包视频", "doubao-video")) {

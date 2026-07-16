@@ -351,22 +351,12 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         if (isSupportedVideoModel(defaultModel)) {
             return defaultModel;
         }
-        List<AiModel> videoModels = aiModelService.getListByType(MODEL_TYPE_VIDEO);
-        for (AiModel model : videoModels) {
-            if (isSupportedVideoModel(model)) {
-                if (defaultModel != null && !Objects.equals(model.getId(), defaultModel.getId())) {
-                    log.warn("[generate_video] 默认视频模型没有可用策略，已回退到支持的视频模型: defaultModelId={}, fallbackModelId={}",
-                            defaultModel.getId(), model.getId());
-                }
-                return model;
-            }
-        }
         String unsupportedDefault = defaultModel != null
                 ? " 当前默认视频模型 " + modelLabel(defaultModel) + " 的平台为 "
                         + generationModelCapabilityService.resolveModelPlatform(defaultModel) + "，没有对应的视频生成策略。"
                 : "";
         throw new IllegalStateException("未配置可用的视频生成模型。" + unsupportedDefault
-                + " 请在设置中配置 DashScope、火山引擎、NewAPI 或 Google Flow 等受支持的视频模型，并设为默认视频模型。"
+                + " 请检查该默认模型的 API 平台、模型族或 videoStrategy 配置。"
                 + " 当前已注册的视频策略: " + videoGenerationStrategyRouter.supportedPlatformsText());
     }
 

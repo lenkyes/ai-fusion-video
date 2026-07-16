@@ -185,22 +185,13 @@ public class GetGenerationModelCapabilitiesToolExecutor implements ToolExecutor 
     private ResolvedModel resolvePreferredModel(int modelType) {
         AiModel defaultModel = aiModelService.getDefaultByType(modelType);
         if (defaultModel != null) {
-            if (modelType != MODEL_TYPE_VIDEO || videoGenerationStrategyRouter.supports(defaultModel)) {
-                return new ResolvedModel(defaultModel, "default_model");
-            }
+            return new ResolvedModel(defaultModel,
+                    modelType == MODEL_TYPE_VIDEO && !videoGenerationStrategyRouter.supports(defaultModel)
+                            ? "unsupported_default_model"
+                            : "default_model");
         }
 
         List<AiModel> models = aiModelService.getListByType(modelType);
-        if (modelType == MODEL_TYPE_VIDEO) {
-            for (AiModel model : models) {
-                if (videoGenerationStrategyRouter.supports(model)) {
-                    return new ResolvedModel(model, "first_strategy_supported_fallback");
-                }
-            }
-            if (defaultModel != null) {
-                return new ResolvedModel(defaultModel, "unsupported_default_model");
-            }
-        }
         if (!models.isEmpty()) {
             return new ResolvedModel(models.get(0), "first_enabled_fallback");
         }

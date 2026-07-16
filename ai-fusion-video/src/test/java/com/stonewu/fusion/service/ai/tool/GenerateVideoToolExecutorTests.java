@@ -88,7 +88,7 @@ class GenerateVideoToolExecutorTests {
     }
 
     @Test
-    void skipsUnsupportedDefaultVideoModelAndUsesSupportedFallback() throws Exception {
+    void rejectsUnsupportedDefaultVideoModelInsteadOfUsingAnotherModel() throws Exception {
         AiModelService aiModelService = mock(AiModelService.class);
         VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
         VideoGenerationConsumer videoGenerationConsumer = mock(VideoGenerationConsumer.class);
@@ -102,22 +102,10 @@ class GenerateVideoToolExecutorTests {
                 .name("GPT 5.5")
                 .code("gpt-5.5")
                 .build();
-        AiModel supportedFallback = AiModel.builder()
-                .id(42L)
-                .name("Seedance")
-                .code("seedance-2-0-pro")
-                .build();
-
         when(aiModelService.getDefaultByType(3)).thenReturn(unsupportedDefault);
-        when(aiModelService.getListByType(3)).thenReturn(List.of(unsupportedDefault, supportedFallback));
         when(strategyRouter.supports(unsupportedDefault)).thenReturn(false);
-        when(strategyRouter.supports(supportedFallback)).thenReturn(true);
-
-        VideoTask completedTask = VideoTask.builder().id(92L).taskId("task-92").status(2).build();
-        when(videoGenerationConsumer.submitAndWait(any(VideoTask.class), eq(7200000L))).thenReturn(completedTask);
-        when(videoGenerationService.listItems(92L)).thenReturn(List.of(VideoItem.builder()
-                .videoUrl("https://example.test/fallback.mp4")
-                .build()));
+        when(capabilityService.resolveModelPlatform(unsupportedDefault)).thenReturn("openai_compatible");
+        when(strategyRouter.supportedPlatformsText()).thenReturn("newapi");
 
         GenerateVideoToolExecutor executor = new GenerateVideoToolExecutor(
                 aiModelService,
@@ -131,10 +119,10 @@ class GenerateVideoToolExecutorTests {
         String result = executor.execute("{\"prompt\":\"镜头缓慢推进\"}",
                 ToolExecutionContext.builder().userId(7L).build());
 
-        ArgumentCaptor<VideoTask> taskCaptor = ArgumentCaptor.forClass(VideoTask.class);
-        verify(videoGenerationConsumer).submitAndWait(taskCaptor.capture(), eq(7200000L));
-        assertThat(taskCaptor.getValue().getModelId()).isEqualTo(42L);
-        assertThat(result).contains("fallback.mp4");
+        verify(videoGenerationConsumer, never()).submitAndWait(any(VideoTask.class), anyLong());
+        assertThat(result).contains("\"status\":\"error\"");
+        assertThat(result).contains("GPT 5.5");
+        assertThat(result).doesNotContain("Seedance");
     }
 
     @Test

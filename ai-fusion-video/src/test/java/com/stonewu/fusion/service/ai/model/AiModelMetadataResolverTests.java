@@ -25,6 +25,37 @@ class AiModelMetadataResolverTests {
     }
 
     @Test
+    void shouldInferGrokImageVideoAliasAsGrokImagineProtocol() {
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
+        AiModel model = AiModel.builder()
+                .name("Grok Image Video")
+                .code("grok-image-video")
+                .modelType(3)
+                .build();
+
+        AiModelMetadata metadata = resolver.resolve(model, "openai_compatible");
+
+        assertEquals("grok_imagine", metadata.modelFamily());
+        assertEquals("grok_imagine", metadata.modelProtocol());
+    }
+
+    @Test
+    void shouldCanonicalizeExplicitGrokVideoAliases() {
+        AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
+        AiModel model = AiModel.builder()
+                .code("third-party-video")
+                .modelType(3)
+                .modelFamily("grok-image-video")
+                .modelProtocol("grok-video")
+                .build();
+
+        AiModelMetadata metadata = resolver.resolve(model, "openai_compatible");
+
+        assertEquals("grok_imagine", metadata.modelFamily());
+        assertEquals("grok_imagine", metadata.modelProtocol());
+    }
+
+    @Test
     void shouldInferNewApiSpecificProtocolFromFamilyKeywords() {
         AiModelMetadataResolver resolver = new AiModelMetadataResolver(mock(ApiConfigService.class));
         AiModel model = AiModel.builder()
