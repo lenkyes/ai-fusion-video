@@ -16,7 +16,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,7 +23,7 @@ import static org.mockito.Mockito.when;
 class VideoGenerationConsumerTests {
 
     @Test
-    void submitTaskSerializesGrokVideoRequestsEvenWhenModelConcurrencyIsHigher() {
+    void submitTaskUsesConfiguredConcurrencyForGrokVideoModel() {
         RedisTaskQueue taskQueue = mock(RedisTaskQueue.class);
         VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
         AiModelService aiModelService = mock(AiModelService.class);
@@ -40,7 +39,6 @@ class VideoGenerationConsumerTests {
                 .status(1)
                 .build();
         when(aiModelService.getById(100L)).thenReturn(model);
-        when(capabilityService.isGrokImagineVideoModel(model)).thenReturn(true);
         when(videoGenerationService.create(any(VideoTask.class))).thenAnswer(invocation -> {
             VideoTask created = invocation.getArgument(0);
             created.setId(200L);
@@ -53,8 +51,7 @@ class VideoGenerationConsumerTests {
 
         consumer.submitTask(VideoTask.builder().modelId(100L).prompt("test prompt").build());
 
-        verify(taskQueue).setMaxConcurrent("video_generation:model:100", 1);
-        verify(taskQueue, never()).setMaxConcurrent("video_generation:model:100", 5);
+        verify(taskQueue).setMaxConcurrent("video_generation:model:100", 5);
     }
 
     @Test

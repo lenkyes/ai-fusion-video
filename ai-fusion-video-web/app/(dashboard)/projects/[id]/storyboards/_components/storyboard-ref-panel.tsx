@@ -47,7 +47,7 @@ import {
 import { BatchGenDialog } from "./batch-gen-dialog";
 import type { AssetItemWithInfo, SelectedAssetItem } from "./batch-gen-dialog";
 import { VideoGenDialog } from "./video-gen-dialog";
-import { FrameGenDialog, getStoryboardFrames } from "./frame-gen-dialog";
+import { FrameGenDialog } from "./frame-gen-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 
 // ========== 类型 ==========
@@ -274,12 +274,7 @@ function SceneAssetPanel({
     const generationRequestId = `storyboard-video-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}`;
-    const selectedStoryboardItems = sceneGroup.items.filter((item) => selectedItemIds.includes(item.id));
-    const parallelVideoGeneration = !promptOnly && selectedStoryboardItems.length > 0
-      && selectedStoryboardItems.every((item) => {
-        const frames = getStoryboardFrames(item);
-        return !!frames.firstFrameImageUrl && !!frames.lastFrameImageUrl;
-      });
+    const parallelVideoGeneration = !promptOnly && selectedItemIds.length > 1;
 
     addPipeline({
       label: promptOnly
