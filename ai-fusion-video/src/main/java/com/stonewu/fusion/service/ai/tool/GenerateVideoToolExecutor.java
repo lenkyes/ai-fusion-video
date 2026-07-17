@@ -203,6 +203,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             AiModel model = resolvePreferredModel();
             modelId = model.getId();
+            prompt = enhanceGrokImaginePrompt(prompt, model);
             storyboardCategory = storyboardItemCategory(storyboardItemId);
             idempotencyCategory = resolveIdempotencyCategory(storyboardCategory, forceRegenerate, generationRequestId);
             VideoTask existingTask = findActiveStoryboardVideoTask(storyboardCategory, userId, modelId);
@@ -358,6 +359,31 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
         throw new IllegalStateException("未配置可用的视频生成模型。" + unsupportedDefault
                 + " 请检查该默认模型的 API 平台、模型族或 videoStrategy 配置。"
                 + " 当前已注册的视频策略: " + videoGenerationStrategyRouter.supportedPlatformsText());
+    }
+
+    /**
+     * Grok Imagine is particularly sensitive to relative scale and contact points in
+     * multi-person reference scenes. Keep this guidance close to the actual request
+     * so it is applied to regeneration as well as the initial generation.
+     */
+    private String enhanceGrokImaginePrompt(String prompt, AiModel model) {
+        if (!isGrokImagineModel(model)) {
+            return prompt;
+        }
+        return prompt + "\n\nPhysical continuity requirements: preserve natural human anatomy and consistent body proportions for every person. In multi-person shots, keep all people at a believable relative scale according to camera distance and place each person in a clear, stable position without resizing or stretching anyone. Feet must stay on the floor or on the stated support; seated people must have hips supported by the chair/bench/ground with thighs and legs visibly connected, never floating. Maintain gravity, contact shadows, and correct occlusion. Do not merge bodies or limbs, and do not let any person appear disproportionately enlarged, elongated, or detached from the environment.";
+    }
+
+    private boolean isGrokImagineModel(AiModel model) {
+        if (model == null) {
+            return false;
+        }
+        return containsGrok(model.getModelFamily())
+                || containsGrok(model.getCode())
+                || containsGrok(model.getName());
+    }
+
+    private boolean containsGrok(String value) {
+        return StrUtil.isNotBlank(value) && value.toLowerCase(java.util.Locale.ROOT).contains("grok");
     }
 
     private AiModel resolvePreferredModelOrNull() {

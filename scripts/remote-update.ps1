@@ -478,8 +478,23 @@ if [ ! -f "$compose_file" ]; then
 fi
 
 for service in "${services[@]}"; do
+  build_log="$remote_base/docker-build-${service}.log"
   echo "[remote] docker compose up -d --build $service"
-  DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -f "$compose_file" up -d --build "$service"
+  echo "[remote] full build log: $build_log"
+
+  set +e
+  DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 BUILDKIT_PROGRESS=plain \
+    docker compose -f "$compose_file" up -d --build "$service" 2>&1 | tee "$build_log"
+  compose_rc=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$compose_rc" -ne 0 ]; then
+    echo "[remote] build failed for service '$service' with exit code $compose_rc" >&2
+    echo "[remote] last 120 log lines:" >&2
+    tail -n 120 "$build_log" >&2 || true
+    echo "[remote] inspect the full log on the server: $build_log" >&2
+    exit "$compose_rc"
+  fi
 done
 
 echo "[remote] compose status"
