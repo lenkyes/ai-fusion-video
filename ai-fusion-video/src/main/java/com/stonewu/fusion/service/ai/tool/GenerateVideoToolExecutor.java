@@ -220,6 +220,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
             GenerationModelCapabilityService.VideoModelCapability capability =
                     generationModelCapabilityService.resolveVideoCapability(model);
+            boolean grokImagine = isGrokImagineModel(model);
 
             String firstFrameImageUrl = params.getStr("firstFrameImageUrl");
             String lastFrameImageUrl = params.getStr("lastFrameImageUrl");
@@ -232,7 +233,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     log.warn("[generate_video] 上一镜头存在视频但没有可用尾帧图，将退化为视频参考: storyboardItemId={}, previousItemId={}",
                             storyboardItemId, previousShotInputs.storyboardItemId());
                 }
-                if (supportsFirstFrame(capability) && StrUtil.isBlank(firstFrameImageUrl)) {
+                if ((grokImagine || supportsFirstFrame(capability)) && StrUtil.isBlank(firstFrameImageUrl)) {
                     firstFrameImageUrl = firstNonBlank(
                             frameInputs.firstFrameImageUrl(),
                             previousShotInputs.lastFrameImageUrl());
@@ -243,7 +244,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                                 storyboardItemId, previousShotInputs.storyboardItemId());
                     }
                 }
-                if (supportsLastFrame(capability) && StrUtil.isBlank(lastFrameImageUrl)
+                if ((grokImagine || supportsLastFrame(capability)) && StrUtil.isBlank(lastFrameImageUrl)
                         && StrUtil.isNotBlank(frameInputs.lastFrameImageUrl())) {
                     lastFrameImageUrl = frameInputs.lastFrameImageUrl();
                     log.info("[generate_video] 自动使用分镜镜头尾帧图: storyboardItemId={}", storyboardItemId);
@@ -254,7 +255,31 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             lastFrameImageUrl = resolvePublicMediaUrl(lastFrameImageUrl, "lastFrameImageUrl");
 
             // 解析多模态参考图片列表。预设画风图只参与文字风格，不作为视频主体参考图传给上游。
-            List<String> referenceImageUrlList = collectMediaUrls(params, "referenceImageUrls", true);
+            List<String> referenceImageUrlList = new ArrayList<>(
+                    collectMediaUrls(params, "referenceImageUrls", true));
+            if (grokImagine) {
+                List<String> orderedReferences = new ArrayList<>();
+                addDistinct(orderedReferences, firstFrameImageUrl);
+                addDistinct(orderedReferences, lastFrameImageUrl);
+                for (String referenceImageUrl : referenceImageUrlList) {
+                    addDistinct(orderedReferences, referenceImageUrl);
+                }
+                Integer maxReferenceImages = capability != null ? capability.maxReferenceImages() : null;
+                if (maxReferenceImages != null && orderedReferences.size() > maxReferenceImages) {
+                    log.warn("[generate_video] Grok reference images exceed limit; keeping the first {} images",
+                            maxReferenceImages);
+                    orderedReferences = new ArrayList<>(orderedReferences.subList(0, maxReferenceImages));
+                }
+                boolean hasStartReference = StrUtil.isNotBlank(firstFrameImageUrl);
+                boolean hasEndReference = StrUtil.isNotBlank(lastFrameImageUrl)
+                        && !Objects.equals(firstFrameImageUrl, lastFrameImageUrl);
+                prompt = appendGrokFrameReferenceGuidance(prompt, hasStartReference, hasEndReference);
+                referenceImageUrlList = orderedReferences;
+                log.info("[generate_video] mapped Grok storyboard frames to ordered references: start={}, end={}, total={}",
+                        hasStartReference, hasEndReference, referenceImageUrlList.size());
+                firstFrameImageUrl = null;
+                lastFrameImageUrl = null;
+            }
             String referenceImageUrls = toJsonOrNull(referenceImageUrlList);
 
             // 解析参考视频列表
@@ -384,6 +409,21 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     private boolean containsGrok(String value) {
         return StrUtil.isNotBlank(value) && value.toLowerCase(java.util.Locale.ROOT).contains("grok");
+    }
+
+    private String appendGrokFrameReferenceGuidance(String prompt,
+                                                     boolean hasStartReference,
+                                                     boolean hasEndReference) {
+        if (hasStartReference && hasEndReference) {
+            return prompt + "\n\nReference image mapping: @image1 is the starting composition and character placement reference. @image2 is the desired ending state and composition reference. Create a natural, physically continuous transition from the first state toward the second; use @image2 as ending guidance rather than forcing an exact frame interpolation. Keep character identity, relative scale, body proportions, clothing, environment, and spatial layout consistent between both references.";
+        }
+        if (hasStartReference) {
+            return prompt + "\n\nReference image mapping: @image1 is the starting composition and character placement reference. Preserve its character identity, relative scale, body proportions, environment, and spatial layout throughout the shot.";
+        }
+        if (hasEndReference) {
+            return prompt + "\n\nReference image mapping: @image1 is the desired ending state and composition reference. Move naturally toward this state while preserving character identity, relative scale, body proportions, environment, and spatial layout.";
+        }
+        return prompt;
     }
 
     private AiModel resolvePreferredModelOrNull() {
