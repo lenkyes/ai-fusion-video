@@ -132,7 +132,7 @@ export default function DashboardLayout({
 
   return (
     <LayoutContext value={layoutCtx}>
-      <div className="h-screen overflow-hidden flex flex-col bg-background">
+      <div className="h-dvh overflow-hidden flex flex-col bg-background">
         <VersionUpdateNotifier />
 
         {/* 顶部浮动导航栏 */}
@@ -176,7 +176,7 @@ export default function DashboardLayout({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="fixed left-4 top-22 z-50 lg:hidden w-[60vw] min-w-[200px] max-w-[300px]"
+                  className="fixed left-2 top-20 bottom-3 z-50 lg:hidden w-[min(86vw,300px)]"
                 >
                   <SidebarNav project={currentProject} onNavigate={() => setSidebarRoute(null)} />
                 </motion.div>
@@ -189,12 +189,14 @@ export default function DashboardLayout({
             <button
               onClick={() => setSidebarRoute(sidebarOpen ? null : pathname)}
               className={cn(
-                "fixed left-3 bottom-4 z-60 lg:hidden",
+                "fixed left-3 z-60 lg:hidden",
                 "h-11 w-11 rounded-full flex items-center justify-center",
                 "bg-primary text-primary-foreground shadow-lg shadow-primary/20",
                 "hover:shadow-primary/30 hover:scale-105",
                 "active:scale-95 transition-all duration-200"
               )}
+              style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
+              aria-label={sidebarOpen ? "关闭侧边导航" : "打开侧边导航"}
             >
               {sidebarOpen ? (
                 <X className="h-5 w-5" />
@@ -205,7 +207,7 @@ export default function DashboardLayout({
           )}
 
           {/* 主内容区 */}
-          <main className="flex-1 min-w-0 min-h-0 py-4 px-5 lg:px-8 overflow-auto">
+          <main className="flex-1 min-w-0 min-h-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:py-4 lg:px-8 overflow-auto">
             <div className={cn("w-full h-full mx-auto transition-[max-width] duration-300 ease-in-out", fullWidth ? "max-w-full" : "max-w-7xl")}>
               {ready ? children : null}
             </div>

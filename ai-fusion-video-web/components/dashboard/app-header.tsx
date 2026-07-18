@@ -153,7 +153,7 @@ export function AppHeader() {
   };
 
   return (
-    <header ref={headerRef} className="fixed top-0 left-0 right-0 z-50 px-4 pt-3">
+    <header ref={headerRef} className="fixed top-0 left-0 right-0 z-50 px-2 pt-2 sm:px-4 sm:pt-3">
       <MenuBar
         items={menuItems}
         activeItem={activeLabel}
@@ -169,9 +169,9 @@ export function AppHeader() {
             <img
               src="/logo.png"
               alt="星拓"
-              className="h-8 w-auto ml-2 rounded-lg"
+              className="h-7 w-auto ml-1 rounded-lg sm:h-8 sm:ml-2"
             />
-            <span className="ml-2 text-lg font-bold text-foreground">星拓</span>
+            <span className="ml-2 hidden text-lg font-bold text-foreground sm:inline">星拓</span>
           </div>
         }
         mobileControls={
@@ -194,7 +194,7 @@ export function AppHeader() {
           </button>
         }
         rightContent={
-          <div className="flex items-center gap-2 justify-end">
+          <div className="flex items-center gap-0.5 justify-end sm:gap-2">
             {/* 主题切换按钮 */}
             <AnimatedThemeToggler className="rounded-xl text-violet-500 hover:text-violet-600 hover:bg-violet-500/10 dark:text-violet-300 dark:hover:text-violet-200 dark:hover:bg-violet-400/10 transition-colors" />
 
