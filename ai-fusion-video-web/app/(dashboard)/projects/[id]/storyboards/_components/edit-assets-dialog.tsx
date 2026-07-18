@@ -4,9 +4,17 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Users, MapPin, Package, Check, Loader2, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
-import type { AssetWithItems, AssetItem } from "@/lib/api/asset";
+import type { AssetWithItems } from "@/lib/api/asset";
 import type { StoryboardItem } from "@/lib/api/storyboard";
 import { SafeImage } from "@/components/ui/safe-image";
+
+const CHARACTER_APPEARANCE_TYPES = new Set([
+  "initial",
+  "variant",
+  "age",
+  "costume",
+  "damaged",
+]);
 
 interface EditItemAssetsDialogProps {
   open: boolean;
@@ -65,15 +73,22 @@ export function EditItemAssetsDialog({
   const sceneAssets = useMemo(() => assetsList.filter((a) => a.type === "scene"), [assetsList]);
   const propAssets = useMemo(() => assetsList.filter((a) => a.type === "prop"), [assetsList]);
 
-  // 展开所有子资产变体为扁平列表
-  const characterItems = useMemo(() => {
-    return characterAssets.flatMap((asset) =>
-      (asset.items || []).map((subItem) => ({
-        ...subItem,
+  const characterGroups = useMemo(() => {
+    return characterAssets
+      .map((asset) => ({
         asset,
+        items: (asset.items || []).filter((subItem) =>
+          CHARACTER_APPEARANCE_TYPES.has(subItem.itemType || "")
+        ),
       }))
-    );
+      .filter((group) => group.items.length > 0);
   }, [characterAssets]);
+  const characterItems = useMemo(
+    () => characterGroups.flatMap(({ asset, items }) =>
+      items.map((subItem) => ({ ...subItem, asset }))
+    ),
+    [characterGroups]
+  );
 
   const sceneItems = useMemo(() => {
     return sceneAssets.flatMap((asset) =>
@@ -95,11 +110,15 @@ export function EditItemAssetsDialog({
 
   if (!open || !item) return null;
 
-  const toggleCharacter = (itemId: number) => {
+  const toggleCharacter = (assetId: number, itemId: number) => {
     setSelectedCharacterIds((prev) => {
       const next = new Set(prev);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
+      const assetItemIds = new Set(
+        characterAssets.find((asset) => asset.id === assetId)?.items.map((entry) => entry.id) || []
+      );
+      const wasSelected = next.has(itemId);
+      assetItemIds.forEach((id) => next.delete(id));
+      if (!wasSelected) next.add(itemId);
       return next;
     });
   };
@@ -172,7 +191,7 @@ export function EditItemAssetsDialog({
           {/* Characters Section */}
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5 pl-0.5">
-              <Users className="h-3.5 w-3.5" /> 角色关联 (多选)
+              <Users className="h-3.5 w-3.5" /> 角色关联（每个角色选择一个形态）
             </h4>
             {characterItems.length === 0 ? (
               <p className="text-[11px] text-muted-foreground/60 italic pl-0.5">暂无项目角色资产，请先在资产库中添加</p>
@@ -184,7 +203,7 @@ export function EditItemAssetsDialog({
                   return (
                     <button
                       key={item.id}
-                      onClick={() => toggleCharacter(item.id)}
+                      onClick={() => toggleCharacter(item.asset.id, item.id)}
                       className={cn(
                         "group relative flex flex-col rounded-xl border overflow-hidden transition-all text-left bg-muted/5",
                         isChecked
