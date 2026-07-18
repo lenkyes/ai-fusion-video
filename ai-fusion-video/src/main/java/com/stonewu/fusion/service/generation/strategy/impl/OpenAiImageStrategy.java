@@ -69,9 +69,9 @@ public class OpenAiImageStrategy implements ImageGenerationStrategy {
     private final StorageConfigService storageConfigService;
     private final PresetArtStyleResourceResolver presetArtStyleResourceResolver;
     private final OkHttpClient okHttpClient = new OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(150, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build();
 
     @Override
