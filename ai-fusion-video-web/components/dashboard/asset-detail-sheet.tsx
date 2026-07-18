@@ -1129,6 +1129,11 @@ function AssetItemCreatePanel({
                 )}
               </div>
             )}
+            {assetType === "character" && CHARACTER_APPEARANCE_ITEM_TYPES.has(itemType) && (
+              <p className="text-[10px] text-muted-foreground/60">
+                创建后会自动添加并关联“{name.trim() || "该形态"}三视图”，在任意一张图上点击生图即可成对生成。
+              </p>
+            )}
           </div>
         </section>
 
