@@ -61,26 +61,55 @@ export function EditItemAssetsDialog({
   const [loading, setLoading] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
-  // 当弹窗打开或绑定的镜头改变时重置状态
-  useEffect(() => {
-    if (open && item) {
-      setSelectedCharacterIds(new Set(initialCharacterIds));
-      setSelectedSceneAssetItemId(initialSceneAssetItemId);
-      setSelectedPropIds(new Set(initialPropIds));
-    }
-  }, [open, item?.id, initialCharacterIds, initialSceneAssetItemId, initialPropIds]);
   const characterAssets = useMemo(() => assetsList.filter((a) => a.type === "character"), [assetsList]);
   const sceneAssets = useMemo(() => assetsList.filter((a) => a.type === "scene"), [assetsList]);
   const propAssets = useMemo(() => assetsList.filter((a) => a.type === "prop"), [assetsList]);
 
+  // AI 生成的分镜在 characterIds 里存的是三视图ID，而弹窗只展示形态根项：
+  // 把三视图ID映射回其形态根项（parentItemId），旧式未关联三视图映射到默认 initial，保证已选形态能正确高亮
+  const normalizedInitialCharacterIds = useMemo(() => {
+    const next = new Set<number>();
+    for (const id of initialCharacterIds) {
+      let mapped = id;
+      for (const asset of characterAssets) {
+        const items = asset.items || [];
+        const hit = items.find((entry) => entry.id === id);
+        if (!hit) continue;
+        if (hit.itemType === "three_view") {
+          mapped =
+            hit.parentItemId ??
+            items.find((entry) => entry.itemType === "initial" && entry.parentItemId == null)?.id ??
+            id;
+        }
+        break;
+      }
+      next.add(mapped);
+    }
+    return next;
+  }, [initialCharacterIds, characterAssets]);
+
+  // 当弹窗打开或绑定的镜头改变时重置状态
+  useEffect(() => {
+    if (open && item) {
+      setSelectedCharacterIds(new Set(normalizedInitialCharacterIds));
+      setSelectedSceneAssetItemId(initialSceneAssetItemId);
+      setSelectedPropIds(new Set(initialPropIds));
+    }
+  }, [open, item?.id, normalizedInitialCharacterIds, initialSceneAssetItemId, initialPropIds]);
+
   const characterGroups = useMemo(() => {
     return characterAssets
-      .map((asset) => ({
-        asset,
-        items: (asset.items || []).filter((subItem) =>
+      .map((asset) => {
+        const allItems = asset.items || [];
+        const appearanceItems = allItems.filter((subItem) =>
           CHARACTER_APPEARANCE_TYPES.has(subItem.itemType || "")
-        ),
-      }))
+        );
+        // 兼容旧数据：没有形态根项的角色回退展示非三视图子资产，避免该角色在弹窗中无法选择
+        const items = appearanceItems.length > 0
+          ? appearanceItems
+          : allItems.filter((subItem) => subItem.itemType !== "three_view");
+        return { asset, items };
+      })
       .filter((group) => group.items.length > 0);
   }, [characterAssets]);
   const characterItems = useMemo(
