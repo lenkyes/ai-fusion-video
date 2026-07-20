@@ -17,6 +17,6 @@ public class NewApiGrokImagineVideoProtocolAdapter implements NewApiVideoProtoco
 
     @Override
     public JSONObject buildSubmitBody(NewApiVideoProtocolContext context) {
-        return support.buildSeedanceContentGenerationBody(context);
+        return support.buildGrokImagineSubmitBody(context);
     }
 }

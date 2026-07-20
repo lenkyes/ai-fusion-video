@@ -18,7 +18,7 @@ class NewApiVideoProtocolSupportTests {
     private final NewApiVideoProtocolSupport support = new NewApiVideoProtocolSupport();
 
     @Test
-    void shouldBuildGrokImagineWithSeedanceCompatibleBody() {
+    void shouldBuildGrokImagineWithOfficialXaiBody() {
         VideoTask task = VideoTask.builder().prompt("cinematic shot")
                 .firstFrameImageUrl("https://example.com/first.png")
                 .referenceImageUrls(JSONUtil.toJsonStr(List.of(
@@ -29,19 +29,14 @@ class NewApiVideoProtocolSupportTests {
                 AiModel.builder().code("grok-imagine-video-1-5-preview").build(), null, task,
                 new JSONObject(), new AiModelMetadata("newapi", "newapi", "grok_imagine", "grok_imagine"));
 
-        JSONObject body = support.buildSeedanceContentGenerationBody(context);
-        JSONArray content = body.getJSONArray("content");
-        assertEquals("grok-imagine-video-1-5-preview", body.getStr("model"));
-        assertEquals("cinematic shot", content.getJSONObject(0).getStr("text"));
+        JSONObject body = support.buildGrokImagineSubmitBody(context);
+        assertEquals("grok-imagine-video-1.5", body.getStr("model"));
+        assertEquals("cinematic shot", body.getStr("prompt"));
         assertEquals("https://example.com/first.png",
-                content.getJSONObject(1).getJSONObject("image_url").getStr("url"));
-        assertEquals("https://example.com/ref-1.png",
-                content.getJSONObject(2).getJSONObject("image_url").getStr("url"));
-        assertEquals("https://example.com/ref-2.png",
-                content.getJSONObject(3).getJSONObject("image_url").getStr("url"));
-        assertEquals("16:9", body.getStr("ratio"));
+                body.getJSONObject("image").getStr("url"));
+        assertEquals("16:9", body.getStr("aspect_ratio"));
         assertEquals("720p", body.getStr("resolution"));
-        assertEquals(8L, body.getLong("duration"));
+        assertEquals(8, body.getInt("duration"));
     }
 
     @Test

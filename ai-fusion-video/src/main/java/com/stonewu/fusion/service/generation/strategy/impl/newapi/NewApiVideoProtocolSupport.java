@@ -18,6 +18,8 @@ import java.util.Map;
 @Component
 public class NewApiVideoProtocolSupport {
 
+    private static final String XAI_GROK_IMAGINE_VIDEO_1_5 = "grok-imagine-video-1.5";
+
     public JSONObject buildGenericSubmitBody(NewApiVideoProtocolContext context) {
         JSONObject body = JSONUtil.createObj();
         String modelCode = StrUtil.trim(context.model().getCode());
@@ -145,6 +147,48 @@ public class NewApiVideoProtocolSupport {
 
         body.set("return_last_frame", getBoolean(context.modelConfig(), "returnLastFrame", "return_last_frame", true));
         return body;
+    }
+
+    /** xAI official protocol: POST /v1/videos/generations. */
+    public JSONObject buildGrokImagineSubmitBody(NewApiVideoProtocolContext context) {
+        JSONObject body = JSONUtil.createObj();
+        String modelCode = normalizeGrokImagineModelCode(context.model().getCode());
+        if (StrUtil.isBlank(modelCode)) {
+            throw new BusinessException("New API Grok Imagine 视频模型未配置 code");
+        }
+        body.set("model", modelCode);
+
+        String prompt = StrUtil.trim(context.task().getPrompt());
+        if (StrUtil.isNotBlank(prompt)) {
+            body.set("prompt", prompt);
+        }
+
+        String inputImage = resolveInputImage(context.task());
+        if (StrUtil.isNotBlank(inputImage)) {
+            body.set("image", JSONUtil.createObj().set("url", inputImage));
+        }
+        if (StrUtil.isBlank(prompt) && StrUtil.isBlank(inputImage)) {
+            throw new BusinessException("New API Grok Imagine 视频任务至少需要 prompt 或 image 其一");
+        }
+
+        Integer duration = firstPositive(
+                context.task().getDuration(),
+                getPositiveInteger(context.modelConfig(), "defaultDuration", "duration"));
+        if (duration != null) {
+            body.set("duration", duration);
+        }
+        appendOptionalString(body, "aspect_ratio", context.task().getRatio());
+        appendOptionalString(body, "resolution", context.task().getResolution());
+        return body;
+    }
+
+    private String normalizeGrokImagineModelCode(String modelCode) {
+        String normalized = StrUtil.trim(modelCode);
+        if ("grok-imagine-video-1-5-preview".equalsIgnoreCase(normalized)
+                || "grok-imagine-video-1.5-preview".equalsIgnoreCase(normalized)) {
+            return XAI_GROK_IMAGINE_VIDEO_1_5;
+        }
+        return normalized;
     }
 
     private JSONObject resolveMetadata(JSONObject modelConfig) {

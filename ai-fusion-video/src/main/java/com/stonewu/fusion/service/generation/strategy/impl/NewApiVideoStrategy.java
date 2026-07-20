@@ -37,9 +37,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * New API 视频生成策略。
  * <p>
- * 默认对接官方通用视频接口：
+ * 默认对接通用视频接口：
  * POST /v1/video/generations
  * GET /v1/video/generations/{task_id}
+ * <p>
+ * Grok Imagine 按 xAI 官方接口：
+ * POST /v1/videos/generations
+ * GET /v1/videos/{request_id}
  * <p>
  * Seedance 等内容生成任务接口默认走：
  * POST /api/v3/contents/generations/tasks
@@ -57,9 +61,11 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
     public static final String PLATFORM = "newapi";
 
     private static final String DEFAULT_BASE_URL = "https://docs.newapi.ai";
-    private static final String DEFAULT_VIDEO_GENERATIONS_PATH = "/v1/video/generations";
-    private static final String CONTENT_GENERATION_TASKS_PATH = "/api/v3/contents/generations/tasks";
     private static final String TASK_ID_PLACEHOLDER = "{task_id}";
+    private static final String DEFAULT_VIDEO_GENERATIONS_PATH = "/v1/video/generations";
+    private static final String XAI_VIDEO_GENERATIONS_PATH = "/v1/videos/generations";
+    private static final String XAI_VIDEO_QUERY_PATH = "/v1/videos/" + TASK_ID_PLACEHOLDER;
+    private static final String CONTENT_GENERATION_TASKS_PATH = "/api/v3/contents/generations/tasks";
     private static final long DEFAULT_POLL_INTERVAL_MILLIS = 10000L;
     private static final long DEFAULT_POLL_TIMEOUT_MILLIS = 30L * 60L * 1000L;
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
@@ -230,7 +236,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 return result;
             }
             if ("fail".equals(normalizedStatus) || "failed".equals(normalizedStatus) || "error".equals(normalizedStatus)
-                    || "canceled".equals(normalizedStatus) || "cancelled".equals(normalizedStatus)) {
+                    || "canceled".equals(normalizedStatus) || "cancelled".equals(normalizedStatus)
+                    || "expired".equals(normalizedStatus)) {
                 throw new BusinessException("New API 视频任务失败: "
                         + StrUtil.blankToDefault(result.errorMessage(), "未知错误"));
             }
@@ -287,6 +294,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 root.getStr("url"),
                 root.getStr("video_url"),
                 root.getStr("videoUrl"),
+                nestedFieldString(root, "video", "url"),
                 mediaUrl(root, new Object[]{"content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
                 mediaUrl(root, new Object[]{"data", "content"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
                 mediaUrl(root, new Object[]{"data", "contents"}, "video_url", "videoUrl", "url", "file_url", "fileUrl"),
@@ -442,6 +450,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
     String extractTaskId(String responseBody) {
         JSONObject root = parseObject(responseBody, "New API 视频任务提交响应不是合法 JSON");
         return firstNonBlank(
+                root.getStr("request_id"),
+                root.getStr("requestId"),
                 root.getStr("task_id"),
                 root.getStr("taskId"),
                 root.getStr("id"),
@@ -510,17 +520,31 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 "videoQueryUrl", "queryUrl", "taskQueryUrl", "generationQueryUrl",
                 "videoQueryPathTemplate", "queryPathTemplate", "taskQueryPathTemplate", "generationQueryPathTemplate",
                 "videoQueryPath", "queryPath", "taskQueryPath", "generationQueryPath");
-        String queryPath = StrUtil.blankToDefault(configuredPath, defaultSubmitPath(metadata) + "/" + TASK_ID_PLACEHOLDER);
+        String queryPath = StrUtil.blankToDefault(configuredPath, defaultQueryPath(metadata));
         return resolveEndpointUrl(apiConfig, queryPath, platformTaskId);
     }
 
     private String defaultSubmitPath(AiModelMetadata metadata) {
-        if (metadata != null && (("seedance".equals(metadata.effectiveFamily())
-                || "grok_imagine".equals(metadata.effectiveFamily()))
+        if (isGrokImagine(metadata)) {
+            return XAI_VIDEO_GENERATIONS_PATH;
+        }
+        if (metadata != null && ("seedance".equals(metadata.effectiveFamily())
                 || "seedance".equals(metadata.effectiveProtocol()))) {
             return CONTENT_GENERATION_TASKS_PATH;
         }
         return DEFAULT_VIDEO_GENERATIONS_PATH;
+    }
+
+    private String defaultQueryPath(AiModelMetadata metadata) {
+        if (isGrokImagine(metadata)) {
+            return XAI_VIDEO_QUERY_PATH;
+        }
+        return defaultSubmitPath(metadata) + "/" + TASK_ID_PLACEHOLDER;
+    }
+
+    private boolean isGrokImagine(AiModelMetadata metadata) {
+        return metadata != null && ("grok_imagine".equals(metadata.effectiveFamily())
+                || "grok_imagine".equals(metadata.effectiveProtocol()));
     }
 
     private NewApiVideoProtocolContext buildProtocolContext(AiModel model, ApiConfig apiConfig,
