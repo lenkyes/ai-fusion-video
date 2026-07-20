@@ -144,6 +144,15 @@ public class AgentScopeAssistantService {
             请用中文回答，保持专业、简洁的风格。
             """;
 
+    private static final String GLOBAL_WORKSPACE_SYSTEM_PROMPT = """
+            你是一个通用 AI 对话助手。请直接回答用户的问题，帮助用户进行分析、写作、润色、构思和头脑风暴。
+
+            当前处于全局工作区，不关联任何具体项目。不要查询、创建、修改或删除项目、剧本、资产、分镜或其他工作区数据，
+            不要要求或猜测任何内部数据标识。只有用户明确选择具体项目后，才可以使用项目上下文并执行项目操作。
+
+            请用中文回答，保持清晰、自然、简洁的风格。
+            """;
+
     /**
      * 流式对话（AgentScope 版）
      */
@@ -651,6 +660,10 @@ public class AgentScopeAssistantService {
     }
 
     private String getSystemPrompt(AiChatReqVO reqVO) {
+        if (isGlobalWorkspace(reqVO)) {
+            return GLOBAL_WORKSPACE_SYSTEM_PROMPT;
+        }
+
         String systemPrompt;
         if (StrUtil.isNotBlank(reqVO.getSystemPrompt())) {
             systemPrompt = reqVO.getSystemPrompt();
@@ -677,6 +690,14 @@ public class AgentScopeAssistantService {
         return systemPrompt;
     }
 
+    private boolean isGlobalWorkspace(AiChatReqVO reqVO) {
+        if (reqVO == null || reqVO.getProjectId() != null) {
+            return false;
+        }
+        Map<String, Object> context = reqVO.getContext();
+        return context != null && "global_workspace".equals(context.get("projectScope"));
+    }
+
     /**
      * 构建 Toolkit（含普通工具和子 Agent 工具）
      */
@@ -684,6 +705,13 @@ public class AgentScopeAssistantService {
             ToolExecutionContext toolExecContext,
             StreamingEventHook streamingHook,
             AgentCancellationToken cancellationToken) {
+        // 全局工作区是纯对话模式，不能让模型通过工具自行落到某个项目。
+        if (isGlobalWorkspace(reqVO)) {
+            log.info("跳过全局工作区的工具装配: agentType={}, conversationId={}",
+                    reqVO.getAgentType(), reqVO.getConversationId());
+            return null;
+        }
+
         String agentType = reqVO.getAgentType();
 
         // 检查是否启用工具

@@ -118,10 +118,10 @@ function CopyButton({ text }: { text: string }) {
 }
 
 const suggestedPrompts = [
-  "帮我梳理最近项目下一步应该推进什么",
-  "根据我的项目列表，给我一个短剧创作排期建议",
-  "我想做一个3分钟AI短剧，帮我拆成剧本、资产、分镜、视频生成步骤",
-  "检查我当前项目可能缺少哪些角色、场景或分镜准备",
+  "帮我构思一个有反转的短剧故事",
+  "把这个想法整理成清晰的创作大纲",
+  "帮我润色下面这段对白，让人物更有张力",
+  "给我一些适合短视频的创意方向",
 ];
 
 function formatTime(value?: string) {
@@ -206,7 +206,7 @@ function EmptyAssistantState({
       </div>
       <h2 className="text-lg font-semibold">AI 创作助手</h2>
       <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-        可以帮你规划短剧项目、查询已有项目和资产、生成创作建议，也可以调用已启用的创作工具推进内容。
+        全局工作区是通用对话助手；选择具体项目后，才会读取项目上下文并执行项目操作。
       </p>
       <div className="mt-6 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
         {suggestedPrompts.map((prompt) => (
@@ -695,7 +695,7 @@ export default function DashboardAssistantPage() {
                   }
                 }}
                 disabled={isStreaming}
-                placeholder="告诉 AI 你想推进什么：规划项目、检查资产、生成创意、查询现有内容..."
+                placeholder="告诉 AI 你想聊什么：构思故事、润色对白、整理大纲、分析创意..."
                 className="max-h-40 min-h-12 resize-none rounded-lg py-3 text-sm"
               />
               {isStreaming ? (
@@ -709,7 +709,7 @@ export default function DashboardAssistantPage() {
               )}
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Enter 发送，Shift + Enter 换行。全局工作区会优先查询你的项目列表，选择项目后会带上项目上下文。
+              Enter 发送，Shift + Enter 换行。全局工作区仅进行通用对话，选择具体项目后才会使用项目上下文。
             </p>
           </div>
         </footer>
