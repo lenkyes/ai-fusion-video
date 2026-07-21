@@ -533,14 +533,14 @@ public class AiAgentRegistry {
                                 .type("storyboard_video_gen")
                                 .name("分镜视频生成")
                                 .toolNames(List.of(
-                                                "get_project", "get_storyboard", "get_storyboard_scene_items"))
+                                                "get_project", "get_storyboard"))
                                 .subAgentTools(List.of(
                                                 AiAgentDefinition.SubAgentToolDef.builder()
                                                                 .toolName("generate_storyboard_video")
                                                                 .displayName("为镜头生成视频")
                                                                 .description("""
-                                                                                为单个分镜镜头生成AI视频并自动保存。每次调用只处理一个镜头；批量生成时必须按分镜顺序串行调用，等待上一镜头完成后再处理下一镜头，以便复用上一镜头尾帧和参考视频。
-                                                                                主 Agent 必须先整理统一的 consistencyContext，并在每次调用中传给子 Agent；即使只生成一个镜头，也要基于项目资产和该镜头所在场次生成一致性上下文，确保角色、场景、道具保持一致。
+                                                                                为单个分镜镜头生成AI视频并自动保存。每次调用只处理一个镜头；批量生成时，每个选中的 storyboardItemId 都必须独立调用一次。单个镜头失败只记录该镜头错误，不得阻止其余选中镜头继续执行。
+                                                                                主 Agent 只负责保留目标镜头ID清单和分发任务，不要在分发前查询各镜头的场次明细。每个子 Agent 会自行调用 get_storyboard_scene_items 查询当前镜头、相邻镜头和资产引用。主 Agent 根据 get_project 整理批次级画风约束，并在每次调用中传给子 Agent。
 
                                                                                 调用时 message 必须包含以下信息（每行一个键值对）：
                                                                                 - storyboardItemId: 分镜条目ID（数字，必传）
@@ -550,12 +550,12 @@ public class AiAgentRegistry {
                                                                                 - forceRegenerate: true/false（上下文有 forceRegenerate=true、overwriteExistingVideo=true，或用户明确要求重新生成/覆盖时传 true）
                                                                                 - generationRequestId: 本次用户提交的唯一请求ID（若上下文提供则原样传递，禁止编造）
                                                                                 - videoOptimizationNotes: 用户对上一版视频的人工问题反馈（若上下文提供则必须原样传递，供子 Agent 优化提示词）
-                                                                                - consistencyContext: 本次生成共享的一致性上下文（必传；包含角色/场景/道具锁定、参考图顺序、负面约束）
+                                                                                - consistencyContext: 本次生成共享的轻量批次上下文（必传；只包含 get_project 返回的项目画风、画面比例和通用约束；镜头级角色/场景/道具锁定由子 Agent 查询后建立）
                                                                                 - 不要额外传 session_id，框架会自动维护会话
                                                                                 - 不要把分镜条目ID传给 storyboardSceneId 或 sceneId；生成视频时必须使用 storyboardItemId
                                                                                 - 如果视频生成返回 retryable=false、remoteTaskSubmitted=true、平台任务ID、HTTP 4xx 或资源不可访问，不要再次为同一 storyboardItemId 调用 generate_video；即使 forceRegenerate=true 也不要在同一轮失败后重试
 
-                                                                                message 格式模板（具体内容必须来自 get_project / get_storyboard_scene_items 查询结果，不要照抄占位符）：
+                                                                                message 格式模板（主 Agent 的具体内容必须来自 get_project，不要照抄占位符；禁止主 Agent 预查询 get_storyboard_scene_items）：
                                                                                 请为分镜镜头生成视频。
                                                                                 storyboardItemId: {storyboardItemId}
                                                                                 projectId: {projectId}
@@ -565,14 +565,9 @@ public class AiAgentRegistry {
                                                                                 generationRequestId: {generationRequestId 或留空}
                                                                                 consistencyContext:
                                                                                 styleLock: {从项目画风中提炼的艺术风格、质感、色彩、光影}
-                                                                                referenceOrderPolicy: {视频参考图只包含角色、场景、关键道具等资产图；不要传项目预设画风图、/api/art-styles/** 或 /art-styles/**；角色按 assetItemId 升序 → 场景 → 关键道具按 assetItemId 升序；同一 assetItemId 始终使用同一 imageUrl}
-                                                                                characterLocks:
-                                                                                - {角色名}: assetItemId={专属三视图子资产ID}, appearanceItemId={形态根项ID}, parentItemId={应等于 appearanceItemId}, itemType=three_view, imageUrl={该形态专属三视图URL或空}, appearance={来自该形态 properties/分镜的年龄、体型、发型、服装等稳定锚点；不得混用其他形态三视图}
-                                                                                sceneLocks:
-                                                                                - {场景名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, environment={来自资产/分镜的稳定空间结构和光线锚点}
-                                                                                propLocks:
-                                                                                - {道具名}: assetItemId={子资产ID}, imageUrl={子资产图片URL或空}, appearance={来自资产/分镜的稳定道具外观锚点}
-                                                                                negativeConsistencyRules: 保持同一角色外貌和服装、同一场景空间结构、同一道具外观；不新增无关人物；不保留参考图白底、边框、三视图/四栏参考表分栏或脸部特写小栏""")
+                                                                                referenceOrderPolicy: 视频参考图只包含当前镜头角色、场景、关键道具等资产图；不传项目预设画风图；具体图片及顺序由子 Agent 查询当前镜头后确定
+                                                                                continuityLocks: 保持目标 storyboardItemId 清单和顺序；具体角色、场景、道具及相邻镜头连续性由子 Agent 查询后补全
+                                                                                negativeConsistencyRules: 不新增无关人物，不把项目画风参考图作为视频输入""")
                                                                 .refAgentType("storyboard_video_executor")
                                                                 .build()))
                                 .systemPrompt(loadPrompt("storyboard-video-gen.system.md"))
