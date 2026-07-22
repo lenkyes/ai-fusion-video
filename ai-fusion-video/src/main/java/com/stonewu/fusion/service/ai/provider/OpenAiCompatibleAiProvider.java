@@ -29,7 +29,7 @@ import java.util.Set;
 public class OpenAiCompatibleAiProvider extends AbstractAiProvider {
 
     private static final Set<String> SUPPORTED_PLATFORMS = Set.of(
-            "openai_compatible", "openai", "deepseek", "zhipu", "moonshot", "volcengine", "siliconflow", "newapi");
+            "openai_compatible", "openai", "xai", "deepseek", "zhipu", "moonshot", "volcengine", "siliconflow", "newapi");
 
     @Override
     public boolean supports(String platform) {
@@ -226,7 +226,7 @@ public class OpenAiCompatibleAiProvider extends AbstractAiProvider {
         };
     }
 
-    private String resolveRootBaseUrl(String platform, String baseUrl) {
+    String resolveRootBaseUrl(String platform, String baseUrl) {
         return StrUtil.isBlank(baseUrl) ? inferRootBaseUrl(platform) : normalizeBaseUrl(baseUrl);
     }
 
@@ -246,6 +246,7 @@ public class OpenAiCompatibleAiProvider extends AbstractAiProvider {
             case "moonshot" -> "https://api.moonshot.cn";
             case "siliconflow" -> "https://api.siliconflow.cn";
             case "newapi" -> "https://docs.newapi.ai";
+            case "xai" -> "https://api.x.ai";
             case "openai" -> "https://api.openai.com";
             default -> "https://api.openai.com";
         };

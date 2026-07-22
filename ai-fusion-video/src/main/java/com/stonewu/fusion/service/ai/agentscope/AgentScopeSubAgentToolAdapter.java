@@ -29,17 +29,20 @@ public class AgentScopeSubAgentToolAdapter implements AgentTool {
     private final Supplier<ReActAgent> agentFactory;
     private final StreamingEventHook streamingHook;
     private final AgentCancellationToken cancellationToken;
+    private final Runnable invocationCallback;
 
     public AgentScopeSubAgentToolAdapter(String toolName,
             String description,
             Supplier<ReActAgent> agentFactory,
             StreamingEventHook streamingHook,
-            AgentCancellationToken cancellationToken) {
+            AgentCancellationToken cancellationToken,
+            Runnable invocationCallback) {
         this.toolName = toolName;
         this.description = description;
         this.agentFactory = agentFactory;
         this.streamingHook = streamingHook;
         this.cancellationToken = cancellationToken;
+        this.invocationCallback = invocationCallback;
     }
 
     @Override
@@ -83,6 +86,10 @@ public class AgentScopeSubAgentToolAdapter implements AgentTool {
                         "status", "error",
                         "message", "子 Agent 调用缺少 message 参数",
                         "toolName", getName()))));
+            }
+
+            if (invocationCallback != null) {
+                invocationCallback.run();
             }
 
             Msg userMsg = Msg.builder()

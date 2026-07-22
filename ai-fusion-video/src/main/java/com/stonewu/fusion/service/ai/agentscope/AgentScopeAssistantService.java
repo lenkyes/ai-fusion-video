@@ -52,6 +52,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -201,7 +202,9 @@ public class AgentScopeAssistantService {
                 activeStreamingHooks.put(conversationId, streamingHook);
 
             // 7. 构建 Toolkit（普通工具 + 子 Agent 工具）
-            Toolkit toolkit = buildToolkit(reqVO, model, toolExecContext, streamingHook, cancellationToken);
+            AtomicInteger subAgentInvocationCount = new AtomicInteger();
+            Toolkit toolkit = buildToolkit(reqVO, model, toolExecContext, streamingHook, cancellationToken,
+                    subAgentInvocationCount);
 
             // 7. 构建 ReActAgent
             ReActAgent.Builder agentBuilder = ReActAgent.builder()
@@ -336,7 +339,8 @@ public class AgentScopeAssistantService {
 
                     // 15. 后台异步调用 Agent
                     // agent.call() 返回 Mono<Msg>，Hook 会在执行过程中推送事件
-                    Disposable agentDisposable = agent.call(userMsg)
+                    Disposable agentDisposable = callWithRequiredSubAgentDispatch(
+                            agent, userMsg, reqVO, subAgentInvocationCount)
                         .doOnSuccess(response -> {
                         terminalStatus.compareAndSet("running", "completed");
                         // 发送 DONE 事件（不再在此保存 assistant 消息，改为在事件流中根据累积文本保存）
@@ -704,7 +708,8 @@ public class AgentScopeAssistantService {
     private Toolkit buildToolkit(AiChatReqVO reqVO, Model model,
             ToolExecutionContext toolExecContext,
             StreamingEventHook streamingHook,
-            AgentCancellationToken cancellationToken) {
+            AgentCancellationToken cancellationToken,
+            AtomicInteger subAgentInvocationCount) {
         // 全局工作区是纯对话模式，不能让模型通过工具自行落到某个项目。
         if (isGlobalWorkspace(reqVO)) {
             log.info("跳过全局工作区的工具装配: agentType={}, conversationId={}",
@@ -769,7 +774,8 @@ public class AgentScopeAssistantService {
 
         // 注册子 Agent 工具
         for (AiAgentDefinition.SubAgentToolDef subAgentToolDef : filteredSubAgents) {
-            registerSubAgentTool(toolkit, subAgentToolDef, model, reqVO, toolExecContext, streamingHook, cancellationToken);
+            registerSubAgentTool(toolkit, subAgentToolDef, model, reqVO, toolExecContext, streamingHook,
+                    cancellationToken, subAgentInvocationCount);
         }
 
         log.info("AgentScope Toolkit 构建完成: 普通工具={}, 子Agent工具={}, 总计={}",
@@ -788,7 +794,8 @@ public class AgentScopeAssistantService {
             AiChatReqVO reqVO,
             ToolExecutionContext toolExecContext,
             StreamingEventHook streamingHook,
-            AgentCancellationToken cancellationToken) {
+            AgentCancellationToken cancellationToken,
+            AtomicInteger subAgentInvocationCount) {
         try {
             String subAgentType = subAgentToolDef.getRefAgentType();
             AiAgentDefinition subAgentDef = aiAgentService.getByType(subAgentType);
@@ -851,7 +858,8 @@ public class AgentScopeAssistantService {
                         return subBuilder.build();
                     },
                     streamingHook,
-                    cancellationToken));
+                    cancellationToken,
+                    subAgentInvocationCount::incrementAndGet));
 
             log.info("子 Agent 注册完成: name={}, toolName={}, hasSubTools={}",
                     subAgentToolDef.getToolName(), toolName,
@@ -860,6 +868,45 @@ public class AgentScopeAssistantService {
         } catch (Exception e) {
             log.error("注册子 Agent 工具失败: name={}", subAgentToolDef.getToolName(), e);
         }
+    }
+
+    private Mono<Msg> callWithRequiredSubAgentDispatch(ReActAgent agent,
+            Msg userMsg,
+            AiChatReqVO reqVO,
+            AtomicInteger subAgentInvocationCount) {
+        return agent.call(userMsg).flatMap(response -> {
+            if (!requiresStoryboardFrameDispatch(reqVO) || subAgentInvocationCount.get() > 0) {
+                return Mono.just(response);
+            }
+
+            log.warn("分镜首尾帧调度器未调用子Agent，执行一次纠偏重试: conversationId={}",
+                    reqVO.getConversationId());
+            Msg correction = Msg.builder()
+                    .role(MsgRole.USER)
+                    .textContent("你尚未执行任务。禁止用文字声称已完成。请立即根据 "
+                            + "selectedStoryboardItemIds 调用 generate_storyboard_frames；"
+                            + "每个需要生成首尾帧的镜头调用一次，完成全部真实工具调用后再汇总。")
+                    .build();
+            return agent.call(correction).flatMap(retryResponse -> {
+                if (subAgentInvocationCount.get() > 0) {
+                    return Mono.just(retryResponse);
+                }
+                return Mono.error(new IllegalStateException(
+                        "分镜首尾帧任务未启动：对话模型未调用 generate_storyboard_frames 子 Agent"));
+            });
+        });
+    }
+
+    private boolean requiresStoryboardFrameDispatch(AiChatReqVO reqVO) {
+        if (reqVO == null || !"storyboard_frame_gen".equals(reqVO.getAgentType())
+                || reqVO.getContext() == null) {
+            return false;
+        }
+        Object selectedIds = reqVO.getContext().get("selectedStoryboardItemIds");
+        if (selectedIds instanceof Iterable<?> iterable) {
+            return iterable.iterator().hasNext();
+        }
+        return selectedIds != null && StrUtil.isNotBlank(String.valueOf(selectedIds));
     }
 
     /**

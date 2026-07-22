@@ -29,6 +29,7 @@ export const itemVariants = {
 
 export const platformIconColors: Record<string, { color: string; bg: string }> = {
   openai_compatible: { color: "text-emerald-400", bg: "bg-emerald-500/10" },
+  xai: { color: "text-foreground", bg: "bg-foreground/10" },
   newapi: { color: "text-lime-400", bg: "bg-lime-500/10" },
   volcengine: { color: "text-sky-400", bg: "bg-sky-500/10" },
   vertex_ai: { color: "text-blue-400", bg: "bg-blue-500/10" },
@@ -61,6 +62,17 @@ export interface PlatformField {
 
 export function getPlatformFields(platform: string): PlatformField[] {
   switch (platform) {
+    case "xai":
+      return [
+        {
+          key: "apiUrl",
+          label: "API 地址",
+          placeholder: "https://api.x.ai（留空使用默认地址）",
+          type: "text",
+          helperText: "使用 xAI 的 OpenAI 兼容接口；系统会自动调用 /v1/chat/completions。",
+        },
+        { key: "apiKey", label: "xAI API Key", placeholder: "xai-...", type: "password", required: true },
+      ];
     case "openai_compatible":
     case "volcengine":
       return [

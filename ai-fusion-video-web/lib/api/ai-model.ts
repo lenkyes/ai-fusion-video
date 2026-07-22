@@ -170,6 +170,7 @@ export interface ApiConfigPageReq {
 /** 平台选项 */
 export const PLATFORM_OPTIONS = [
   { value: "openai_compatible", label: "OpenAI 兼容", description: "OpenAI / DeepSeek / 智谱 / 硅基流动等" },
+  { value: "xai", label: "xAI", description: "Grok 文本模型（包括 Grok 4.5）" },
   { value: "newapi", label: "New API", description: "New API 聚合网关，支持远程模型发现与视频任务接口" },
   { value: "volcengine", label: "火山引擎（豆包）", description: "字节跳动火山引擎豆包大模型" },
   { value: "vertex_ai", label: "Google Vertex AI", description: "Google Cloud Vertex AI Gemini" },
@@ -202,6 +203,7 @@ export const MODEL_TYPE_LABELS: Record<number, string> = {
 export const PLATFORM_LABELS: Record<string, string> = {
   openai_compatible: "OpenAI 兼容",
   openai: "OpenAI 兼容",
+  xai: "xAI",
   newapi: "New API",
   deepseek: "DeepSeek",
   volcengine: "火山引擎",

@@ -12,6 +12,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenAiCompatibleAiProviderTests {
 
     @Test
+    void supportsXaiGrokModelsWithOfficialDefaultEndpoint() {
+        OpenAiCompatibleAiProvider provider = new OpenAiCompatibleAiProvider();
+
+        assertThat(provider.supports("xai")).isTrue();
+        assertThat(provider.resolveRootBaseUrl("xai", null)).isEqualTo("https://api.x.ai");
+
+        AiProviderContext context = AiProviderContext.builder()
+                .platform("xai")
+                .apiKey("test-key")
+                .modelName("grok-4.5")
+                .apiConfig(ApiConfig.builder().platform("xai").build())
+                .build();
+
+        Model model = provider.createAgentScopeModel(context);
+
+        assertThat(model.getModelName()).isEqualTo("grok-4.5");
+    }
+
+    @Test
     void createAgentScopeModelUsesResponsesModelWhenEnabled() {
         OpenAiCompatibleAiProvider provider = new OpenAiCompatibleAiProvider();
 
