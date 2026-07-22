@@ -1,6 +1,7 @@
 package com.stonewu.fusion.service.generation.consumer;
 
 import com.stonewu.fusion.entity.ai.AiModel;
+import com.stonewu.fusion.entity.generation.VideoItem;
 import com.stonewu.fusion.entity.generation.VideoTask;
 import com.stonewu.fusion.infrastructure.queue.RedisTaskQueue;
 import com.stonewu.fusion.service.ai.AiModelService;
@@ -11,6 +12,7 @@ import com.stonewu.fusion.service.storage.MediaStorageService;
 import com.stonewu.fusion.service.system.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -21,6 +23,36 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class VideoGenerationConsumerTests {
+
+    @Test
+    void persistVideoItemsStoresEveryPlatformMediaOutput() {
+        VideoGenerationService videoGenerationService = mock(VideoGenerationService.class);
+        MediaStorageService mediaStorageService = mock(MediaStorageService.class);
+        VideoTask task = VideoTask.builder().id(10L).build();
+        VideoItem item = VideoItem.builder()
+                .id(20L)
+                .videoUrl("https://provider.example/video.mp4")
+                .coverUrl("https://provider.example/cover.png")
+                .firstFrameUrl("https://provider.example/first.png")
+                .lastFrameUrl("https://provider.example/last.png")
+                .build();
+        when(videoGenerationService.listItems(10L)).thenReturn(List.of(item));
+        when(mediaStorageService.downloadAndStore(any(String.class), any(String.class)))
+                .thenAnswer(invocation -> "https://storage.example/" + invocation.getArgument(0, String.class)
+                        .substring(invocation.getArgument(0, String.class).lastIndexOf('/') + 1));
+        VideoGenerationConsumer consumer = new VideoGenerationConsumer(
+                mock(RedisTaskQueue.class), videoGenerationService, mock(AiModelService.class),
+                mock(GenerationModelCapabilityService.class), mock(VideoGenerationStrategyRouter.class),
+                mediaStorageService, mock(SystemConfigService.class));
+
+        ReflectionTestUtils.invokeMethod(consumer, "persistVideoItems", task);
+
+        assertThat(item.getVideoUrl()).isEqualTo("https://storage.example/video.mp4");
+        assertThat(item.getCoverUrl()).isEqualTo("https://storage.example/cover.png");
+        assertThat(item.getFirstFrameUrl()).isEqualTo("https://storage.example/first.png");
+        assertThat(item.getLastFrameUrl()).isEqualTo("https://storage.example/last.png");
+        verify(videoGenerationService).updateItem(item);
+    }
 
     @Test
     void submitTaskUsesConfiguredConcurrencyForGrokVideoModel() {

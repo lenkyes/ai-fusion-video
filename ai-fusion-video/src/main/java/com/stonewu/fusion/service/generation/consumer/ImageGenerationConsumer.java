@@ -434,15 +434,10 @@ public class ImageGenerationConsumer {
         List<ImageItem> items = imageGenerationService.listItems(task.getId());
         for (ImageItem item : items) {
             if (StrUtil.isNotBlank(item.getImageUrl())) {
-                try {
-                    String persistedUrl = mediaStorageService.downloadAndStore(item.getImageUrl(), "images");
-                    item.setImageUrl(persistedUrl);
-                    imageGenerationService.updateItem(item);
-                    log.info("[ImageConsumer] 图片已持久化: {} -> {}", item.getId(), persistedUrl);
-                } catch (Exception e) {
-                    log.warn("[ImageConsumer] 图片持久化失败（保留原始 URL）: itemId={}, error={}",
-                            item.getId(), e.getMessage());
-                }
+                String persistedUrl = mediaStorageService.downloadAndStore(item.getImageUrl(), "images");
+                item.setImageUrl(persistedUrl);
+                imageGenerationService.updateItem(item);
+                log.info("[ImageConsumer] 图片已持久化: {} -> {}", item.getId(), persistedUrl);
             }
         }
     }

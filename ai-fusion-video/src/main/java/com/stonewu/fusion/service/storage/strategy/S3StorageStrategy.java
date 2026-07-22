@@ -153,7 +153,8 @@ public class S3StorageStrategy implements StorageStrategy {
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
                 .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
                 .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(true)  // 兼容 MinIO 等路径风格
+      // Use bucket-host API routing; public URLs are normalized to path-style below.
+      .pathStyleAccessEnabled(false)
                         .chunkedEncodingEnabled(false)  // 兼容部分 S3 兼容服务
                         .build())
                 .build();
@@ -168,7 +169,7 @@ public class S3StorageStrategy implements StorageStrategy {
 
     private String buildAccessUrl(StorageConfig config, String objectKey) {
         // 优先使用自定义域名
-        if (StrUtil.isNotBlank(config.getCustomDomain())) {
+        if (StrUtil.isNotBlank(config.getCustomDomain()) && !isLegacyBucketDomain(config)) {
             String domain = config.getCustomDomain().replaceAll("/+$", "");
             if (!domain.startsWith("http://") && !domain.startsWith("https://")) {
                 domain = "https://" + domain;
@@ -177,10 +178,17 @@ public class S3StorageStrategy implements StorageStrategy {
         }
 
         // 默认拼接 endpoint + bucket
-        String endpoint = normalizeEndpoint(config.getEndpoint());
-        // 处理常见的 OSS 域名格式：bucket.endpoint
-        String host = endpoint.replaceAll("^https?://", "");
-        return "https://" + config.getBucketName() + "." + host + "/" + objectKey;
+        // The S3 client uses path-style access, so its public URL must use the
+        // same endpoint/bucket/object layout (required by MinIO, among others).
+        String endpoint = normalizeEndpoint(config.getEndpoint()).replaceAll("/+$", "");
+        return endpoint + "/" + config.getBucketName() + "/" + objectKey;
+    }
+
+    private boolean isLegacyBucketDomain(StorageConfig config) {
+        String endpoint = normalizeEndpoint(config.getEndpoint()).replaceAll("/+$", "");
+        String legacyDomain = endpoint.replaceFirst("^(https?://)", "$1" + config.getBucketName() + ".");
+        String customDomain = normalizeEndpoint(config.getCustomDomain()).replaceAll("/+$", "");
+        return customDomain.equalsIgnoreCase(legacyDomain);
     }
 
     private String normalizeEndpoint(String endpoint) {

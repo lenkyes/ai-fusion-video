@@ -54,9 +54,38 @@ public class MediaStorageService {
         StorageConfig config = storageConfigService.getDefaultConfig();
         StorageStrategy strategy = resolveStrategy(config);
 
+        String storedUrl = normalizeExistingS3Url(remoteUrl, config);
+        if (storedUrl != null) {
+            return storedUrl;
+        }
+
         log.info("[MediaStorage] 开始持久化: url={}, subDir={}, strategy={}",
                 remoteUrl, subDir, strategy.getType());
         return strategy.store(remoteUrl, subDir, config);
+    }
+
+    private String normalizeExistingS3Url(String remoteUrl, StorageConfig config) {
+        if (config == null || !"s3".equalsIgnoreCase(config.getType())
+                || StrUtil.isBlank(config.getEndpoint()) || StrUtil.isBlank(config.getBucketName())) {
+            return null;
+        }
+
+        String endpoint = config.getEndpoint();
+        if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+            endpoint = "https://" + endpoint;
+        }
+        endpoint = endpoint.replaceAll("/+$", "");
+        String canonicalPrefix = endpoint + "/" + config.getBucketName() + "/";
+        if (remoteUrl.startsWith(canonicalPrefix)) {
+            return remoteUrl;
+        }
+
+        String legacyPrefix = endpoint.replaceFirst(
+                "^(https?://)", "$1" + config.getBucketName() + ".") + "/";
+        if (remoteUrl.regionMatches(true, 0, legacyPrefix, 0, legacyPrefix.length())) {
+            return canonicalPrefix + remoteUrl.substring(legacyPrefix.length());
+        }
+        return null;
     }
 
     /**

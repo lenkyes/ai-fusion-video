@@ -7,6 +7,7 @@ import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.storyboard.StoryboardService;
+import com.stonewu.fusion.service.storage.MediaStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class UpdateStoryboardItemFramesToolExecutor implements ToolExecutor {
 
     private final StoryboardService storyboardService;
+    private final MediaStorageService mediaStorageService;
 
     @Override
     public String getToolName() {
@@ -60,6 +62,9 @@ public class UpdateStoryboardItemFramesToolExecutor implements ToolExecutor {
             if (itemId == null || itemId <= 0 || StrUtil.isBlank(firstFrame) || StrUtil.isBlank(lastFrame)) {
                 return error("storyboardItemId、firstFrameImageUrl 和 lastFrameImageUrl 均不能为空");
             }
+
+            firstFrame = mediaStorageService.downloadAndStore(firstFrame, "images");
+            lastFrame = mediaStorageService.downloadAndStore(lastFrame, "images");
 
             StoryboardItem item = storyboardService.getItemById(itemId);
             JSONObject customData = StrUtil.isBlank(item.getCustomData())

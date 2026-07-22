@@ -31,6 +31,9 @@ services:
       JAVA_OPTS: ${JAVA_OPTS:--Xms512m -Xmx1024m}
     volumes:
       - media_data:/app/data/media
+    # 仅暴露给宿主机 Nginx，不对公网开放后端端口
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-18080}:18080"
 
   # ---------- 前端 ----------
   frontend:
@@ -44,11 +47,16 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: ""
+    # 仅暴露给宿主机 Nginx，不对公网开放前端端口
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
 
   # ---------- Nginx 反向代理 ----------
   nginx:
+    # 新服务器使用宿主机 Nginx；只有显式启用该 profile 时才启动容器 Nginx
+    profiles: ["container-nginx"]
     image: nginx:alpine
     container_name: fusion-nginx
     restart: unless-stopped

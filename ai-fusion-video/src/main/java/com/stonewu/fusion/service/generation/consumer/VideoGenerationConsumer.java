@@ -462,26 +462,24 @@ public class VideoGenerationConsumer {
             boolean updated = false;
 
             if (StrUtil.isNotBlank(item.getVideoUrl())) {
-                try {
-                    String persistedUrl = mediaStorageService.downloadAndStore(item.getVideoUrl(), "videos");
-                    item.setVideoUrl(persistedUrl);
-                    updated = true;
-                    log.info("[VideoConsumer] 视频已持久化: itemId={}", item.getId());
-                } catch (Exception e) {
-                    log.warn("[VideoConsumer] 视频持久化失败（保留原始 URL）: itemId={}, error={}",
-                            item.getId(), e.getMessage());
-                }
+                item.setVideoUrl(mediaStorageService.downloadAndStore(item.getVideoUrl(), "videos"));
+                updated = true;
+                log.info("[VideoConsumer] 视频已持久化: itemId={}", item.getId());
             }
 
             if (StrUtil.isNotBlank(item.getCoverUrl())) {
-                try {
-                    String persistedCoverUrl = mediaStorageService.downloadAndStore(item.getCoverUrl(), "images");
-                    item.setCoverUrl(persistedCoverUrl);
-                    updated = true;
-                } catch (Exception e) {
-                    log.warn("[VideoConsumer] 视频封面持久化失败: itemId={}, error={}",
-                            item.getId(), e.getMessage());
-                }
+                item.setCoverUrl(mediaStorageService.downloadAndStore(item.getCoverUrl(), "images"));
+                updated = true;
+            }
+
+            if (StrUtil.isNotBlank(item.getFirstFrameUrl())) {
+                item.setFirstFrameUrl(mediaStorageService.downloadAndStore(item.getFirstFrameUrl(), "images"));
+                updated = true;
+            }
+
+            if (StrUtil.isNotBlank(item.getLastFrameUrl())) {
+                item.setLastFrameUrl(mediaStorageService.downloadAndStore(item.getLastFrameUrl(), "images"));
+                updated = true;
             }
 
             if (updated) {
