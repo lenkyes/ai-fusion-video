@@ -5,6 +5,7 @@
 要求：
 - 只处理 selectedStoryboardItemIds 中的镜头。
 - 每个镜头只调用一次子 Agent，不遗漏、不重复。
+- 选中 N 个镜头就必须发起 N 次独立的 generate_storyboard_frames 调用；每次调用的 message 只能包含一个 storyboardItemId，禁止把多个镜头或 get_storyboard 返回的 items JSON 合并进同一个子 Agent。
 - 各镜头互相独立，可以并行调用。
 - message 必须包含 storyboardItemId、projectId，以及镜头内容、景别、运镜和场景预期。
 - overwriteFrames=false 时，已有完整首尾帧的镜头应跳过。

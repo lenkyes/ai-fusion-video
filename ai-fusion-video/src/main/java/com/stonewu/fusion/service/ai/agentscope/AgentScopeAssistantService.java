@@ -875,38 +875,48 @@ public class AgentScopeAssistantService {
             AiChatReqVO reqVO,
             AtomicInteger subAgentInvocationCount) {
         return agent.call(userMsg).flatMap(response -> {
-            if (!requiresStoryboardFrameDispatch(reqVO) || subAgentInvocationCount.get() > 0) {
+            int expectedDispatches = expectedStoryboardFrameDispatches(reqVO);
+            if (expectedDispatches == 0 || subAgentInvocationCount.get() >= expectedDispatches) {
                 return Mono.just(response);
             }
 
-            log.warn("分镜首尾帧调度器未调用子Agent，执行一次纠偏重试: conversationId={}",
-                    reqVO.getConversationId());
+            log.warn("分镜首尾帧子Agent分发不足，执行一次纠偏重试: conversationId={}, expected={}, actual={}",
+                    reqVO.getConversationId(), expectedDispatches, subAgentInvocationCount.get());
             Msg correction = Msg.builder()
                     .role(MsgRole.USER)
-                    .textContent("你尚未执行任务。禁止用文字声称已完成。请立即根据 "
-                            + "selectedStoryboardItemIds 调用 generate_storyboard_frames；"
-                            + "每个需要生成首尾帧的镜头调用一次，完成全部真实工具调用后再汇总。")
+                    .textContent("你尚未完成分发。禁止把多个镜头合并到一个子 Agent，也禁止用文字声称已完成。请立即为 "
+                            + "selectedStoryboardItemIds 中的每个镜头分别调用一次 generate_storyboard_frames。"
+                            + "本次必须启动 " + expectedDispatches + " 个独立子 Agent，"
+                            + "每次 message 只能包含一个 storyboardItemId，完成全部真实工具调用后再汇总。")
                     .build();
             return agent.call(correction).flatMap(retryResponse -> {
-                if (subAgentInvocationCount.get() > 0) {
+                if (subAgentInvocationCount.get() >= expectedDispatches) {
                     return Mono.just(retryResponse);
                 }
                 return Mono.error(new IllegalStateException(
-                        "分镜首尾帧任务未启动：对话模型未调用 generate_storyboard_frames 子 Agent"));
+                        "分镜首尾帧任务分发不完整：应启动 " + expectedDispatches
+                                + " 个子 Agent，实际启动 " + subAgentInvocationCount.get() + " 个"));
             });
         });
     }
 
-    private boolean requiresStoryboardFrameDispatch(AiChatReqVO reqVO) {
+    private int expectedStoryboardFrameDispatches(AiChatReqVO reqVO) {
         if (reqVO == null || !"storyboard_frame_gen".equals(reqVO.getAgentType())
                 || reqVO.getContext() == null) {
-            return false;
+            return 0;
         }
         Object selectedIds = reqVO.getContext().get("selectedStoryboardItemIds");
         if (selectedIds instanceof Iterable<?> iterable) {
-            return iterable.iterator().hasNext();
+            int count = 0;
+            for (Object ignored : iterable) {
+                count++;
+            }
+            return count;
         }
-        return selectedIds != null && StrUtil.isNotBlank(String.valueOf(selectedIds));
+        if (selectedIds != null && selectedIds.getClass().isArray()) {
+            return java.lang.reflect.Array.getLength(selectedIds);
+        }
+        return selectedIds != null && StrUtil.isNotBlank(String.valueOf(selectedIds)) ? 1 : 0;
     }
 
     /**

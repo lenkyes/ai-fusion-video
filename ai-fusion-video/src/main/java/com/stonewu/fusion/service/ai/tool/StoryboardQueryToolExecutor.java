@@ -13,6 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * 查询分镜详情工具（get_storyboard）
@@ -68,6 +70,15 @@ public class StoryboardQueryToolExecutor implements ToolExecutor {
 
             Storyboard storyboard = storyboardService.getById(storyboardId);
             List<StoryboardItem> items = storyboardService.listItems(storyboardId);
+            int originalTotalItems = items.size();
+            Set<Long> selectedItemIds = selectedStoryboardItemIds(context);
+            if (!selectedItemIds.isEmpty()) {
+                items = items.stream()
+                        .filter(item -> selectedItemIds.contains(item.getId()))
+                        .toList();
+                log.info("get_storyboard 按请求上下文裁剪: storyboardId={}, selected={}, returned={}, original={}",
+                        storyboardId, selectedItemIds.size(), items.size(), originalTotalItems);
+            }
 
             JSONArray itemList = new JSONArray();
             for (StoryboardItem item : items) {
@@ -96,11 +107,46 @@ public class StoryboardQueryToolExecutor implements ToolExecutor {
                     .set("title", storyboard.getTitle())
                     .set("description", storyboard.getDescription())
                     .set("totalItems", items.size())
+                    .set("originalTotalItems", originalTotalItems)
+                    .set("selectionApplied", !selectedItemIds.isEmpty())
                     .set("items", itemList)
                     .toString();
         } catch (Exception e) {
             log.error("查询分镜详情失败", e);
             return JSONUtil.createObj().set("status", "error").set("message", "查询失败: " + e.getMessage()).toString();
+        }
+    }
+
+    private Set<Long> selectedStoryboardItemIds(ToolExecutionContext context) {
+        Set<Long> ids = new LinkedHashSet<>();
+        if (context == null || context.getRequestContext() == null) {
+            return ids;
+        }
+        Object value = context.getRequestContext().get("selectedStoryboardItemIds");
+        if (value instanceof Iterable<?> iterable) {
+            for (Object item : iterable) {
+                addLong(ids, item);
+            }
+        } else if (value != null && value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                addLong(ids, java.lang.reflect.Array.get(value, i));
+            }
+        }
+        return ids;
+    }
+
+    private void addLong(Set<Long> ids, Object value) {
+        if (value instanceof Number number) {
+            ids.add(number.longValue());
+            return;
+        }
+        if (value != null) {
+            try {
+                ids.add(Long.valueOf(String.valueOf(value)));
+            } catch (NumberFormatException ignored) {
+                log.warn("忽略非法的 selectedStoryboardItemId: {}", value);
+            }
         }
     }
 }

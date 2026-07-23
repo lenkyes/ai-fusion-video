@@ -2,6 +2,7 @@ package com.stonewu.fusion.service.ai.tool;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import com.stonewu.fusion.service.ai.ToolExecutionContext;
@@ -57,8 +58,8 @@ public class UpdateStoryboardItemFramesToolExecutor implements ToolExecutor {
         try {
             JSONObject params = JSONUtil.parseObj(toolInput);
             Long itemId = params.getLong("storyboardItemId");
-            String firstFrame = StrUtil.trim(params.getStr("firstFrameImageUrl"));
-            String lastFrame = StrUtil.trim(params.getStr("lastFrameImageUrl"));
+            String firstFrame = resolveImageUrl(params.get("firstFrameImageUrl"));
+            String lastFrame = resolveImageUrl(params.get("lastFrameImageUrl"));
             if (itemId == null || itemId <= 0 || StrUtil.isBlank(firstFrame) || StrUtil.isBlank(lastFrame)) {
                 return error("storyboardItemId、firstFrameImageUrl 和 lastFrameImageUrl 均不能为空");
             }
@@ -75,6 +76,16 @@ public class UpdateStoryboardItemFramesToolExecutor implements ToolExecutor {
             item.setCustomData(customData.toString());
             storyboardService.updateItem(item);
 
+            StoryboardItem saved = storyboardService.getItemById(itemId);
+            JSONObject savedData = StrUtil.isBlank(saved.getCustomData())
+                    ? JSONUtil.createObj() : JSONUtil.parseObj(saved.getCustomData());
+            if (!firstFrame.equals(savedData.getStr("firstFrameImageUrl"))
+                    || !lastFrame.equals(savedData.getStr("lastFrameImageUrl"))) {
+                throw new IllegalStateException("首尾帧已提交但数据库回读校验失败");
+            }
+            log.info("[update_storyboard_item_frames] 保存并校验成功: itemId={}, firstFrame={}, lastFrame={}",
+                    itemId, firstFrame, lastFrame);
+
             return JSONUtil.createObj()
                     .set("status", "success")
                     .set("storyboardItemId", itemId)
@@ -89,5 +100,38 @@ public class UpdateStoryboardItemFramesToolExecutor implements ToolExecutor {
 
     private String error(String message) {
         return JSONUtil.createObj().set("status", "error").set("message", message).toString();
+    }
+
+    private String resolveImageUrl(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                String url = resolveImageUrl(item);
+                if (StrUtil.isNotBlank(url)) {
+                    return url;
+                }
+            }
+            return null;
+        }
+        if (value instanceof JSONObject object) {
+            for (String key : new String[]{"imageUrl", "url", "image_url", "src", "href"}) {
+                String url = resolveImageUrl(object.get(key));
+                if (StrUtil.isNotBlank(url)) {
+                    return url;
+                }
+            }
+            return null;
+        }
+        String text = StrUtil.trim(String.valueOf(value));
+        if (text.startsWith("{") || text.startsWith("[")) {
+            try {
+                return resolveImageUrl(JSONUtil.parse(text));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return text;
     }
 }

@@ -14,6 +14,8 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * AgentScope 子 Agent 工具适配器。
@@ -23,6 +25,10 @@ import java.util.function.Supplier;
  */
 @Slf4j
 public class AgentScopeSubAgentToolAdapter implements AgentTool {
+
+    private static final Pattern STORYBOARD_ITEM_ID_PATTERN = Pattern.compile(
+            "(?i)\\\"?storyboardItemId\\\"?\\s*[:=]\\s*\\\"?(\\d+)");
+    private static final int MAX_FRAME_AGENT_MESSAGE_LENGTH = 8_000;
 
     private final String toolName;
     private final String description;
@@ -72,10 +78,8 @@ public class AgentScopeSubAgentToolAdapter implements AgentTool {
         return Mono.defer(() -> {
             cancellationToken.throwIfCancelled();
 
-            ReActAgent subAgent = agentFactory.get();
             ToolUseBlock toolUseBlock = param != null ? param.getToolUseBlock() : null;
             String parentToolCallId = toolUseBlock != null ? toolUseBlock.getId() : null;
-            streamingHook.bindSubAgentCall(subAgent, parentToolCallId);
 
             String inputMessage = buildInputMessage(param);
             log.info("[AgentScopeSubAgentToolAdapter] 子Agent工具被调用: name={}, parentToolCallId={}, input={}",
@@ -88,9 +92,20 @@ public class AgentScopeSubAgentToolAdapter implements AgentTool {
                         "toolName", getName()))));
             }
 
+            String frameInputError = validateStoryboardFrameInput(inputMessage);
+            if (frameInputError != null) {
+                return Mono.just(buildToolResult(param, JSONUtil.toJsonStr(Map.of(
+                        "status", "error",
+                        "message", frameInputError,
+                        "toolName", getName()))));
+            }
+
             if (invocationCallback != null) {
                 invocationCallback.run();
             }
+
+            ReActAgent subAgent = agentFactory.get();
+            streamingHook.bindSubAgentCall(subAgent, parentToolCallId);
 
             Msg userMsg = Msg.builder()
                     .role(MsgRole.USER)
@@ -117,6 +132,25 @@ public class AgentScopeSubAgentToolAdapter implements AgentTool {
                     "toolName", getName()));
             return Mono.just(buildToolResult(param, errorResult));
         });
+    }
+
+    private String validateStoryboardFrameInput(String inputMessage) {
+        if (!"generate_storyboard_frames".equals(toolName)) {
+            return null;
+        }
+        if (inputMessage.length() > MAX_FRAME_AGENT_MESSAGE_LENGTH) {
+            return "单个首尾帧子 Agent 的 message 过大；禁止传入 items JSON，必须每个镜头单独调用";
+        }
+        Matcher matcher = STORYBOARD_ITEM_ID_PATTERN.matcher(inputMessage);
+        int matches = 0;
+        while (matcher.find()) {
+            matches++;
+        }
+        if (matches != 1) {
+            return "每次 generate_storyboard_frames 调用必须且只能包含一个 storyboardItemId，当前检测到 "
+                    + matches + " 个";
+        }
+        return null;
     }
 
     private String buildInputMessage(ToolCallParam param) {
