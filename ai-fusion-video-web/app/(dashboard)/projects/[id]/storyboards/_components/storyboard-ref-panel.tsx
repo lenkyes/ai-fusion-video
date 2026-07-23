@@ -1511,6 +1511,7 @@ export function StoryboardRefPanel({
           storyboardId: storyboard.id,
           overwriteFrames: false,
           incompleteFramesOnly: true,
+          frameGenerationConcurrency: 4,
         },
       },
       onSettled: async (status) => {

@@ -867,9 +867,10 @@ public class AgentScopeAssistantService {
                                 .hooks(List.of(streamingHook)); // 共享 Hook 实例
 
                         if (!finalSubTools.isEmpty()) {
+                            boolean frameExecutor = "generate_storyboard_frames".equals(toolName);
                             Toolkit subToolkit = new Toolkit(ToolkitConfig.builder()
                                     // 子 Agent 的 generate_video 也不能与同轮其他工具并发，避免读取到旧状态。
-                                    .parallel(false)
+                                    .parallel(frameExecutor)
                                     .executionConfig(ExecutionConfig.builder()
                                             .timeout(resolveToolExecutionTimeout())
                                             .build())
