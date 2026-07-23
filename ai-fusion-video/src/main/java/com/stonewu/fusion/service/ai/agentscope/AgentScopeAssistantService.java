@@ -21,6 +21,8 @@ import com.stonewu.fusion.service.ai.ToolExecutionContext;
 import com.stonewu.fusion.service.ai.ToolExecutor;
 import com.stonewu.fusion.service.ai.StoryboardDurationContext;
 import com.stonewu.fusion.service.script.ScriptService;
+import com.stonewu.fusion.service.storyboard.StoryboardService;
+import com.stonewu.fusion.entity.storyboard.StoryboardItem;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -80,6 +82,7 @@ public class AgentScopeAssistantService {
     private final AiStreamRedisService aiStreamRedisService;
     private final javax.sql.DataSource dataSource;
     private final ScriptService scriptService;
+    private final StoryboardService storyboardService;
 
     @Value("${app.ai.agent-tool-timeout-minutes:130}")
     private long agentToolTimeoutMinutes;
@@ -158,6 +161,7 @@ public class AgentScopeAssistantService {
      * 流式对话（AgentScope 版）
      */
     public Flux<AiChatStreamRespVO> stream(AiChatReqVO reqVO, Long userId) {
+        ensureStoryboardFrameSelection(reqVO);
         log.info("[AgentScope:stream] 开始流式调用: message={}, conversationId={}, agentType={}",
                 reqVO.getMessage(), reqVO.getConversationId(), reqVO.getAgentType());
 
@@ -692,6 +696,28 @@ public class AgentScopeAssistantService {
         }
 
         return systemPrompt;
+    }
+
+    /** 一键生成首尾帧由后端确定目标镜头，避免依赖前端逐个传 ID。 */
+    private void ensureStoryboardFrameSelection(AiChatReqVO reqVO) {
+        if (reqVO == null || !"storyboard_frame_gen".equals(reqVO.getAgentType()) || reqVO.getContext() == null) return;
+        if (!Boolean.TRUE.equals(reqVO.getContext().get("incompleteFramesOnly"))) return;
+        Object storyboardIdValue = reqVO.getContext().get("storyboardId");
+        if (storyboardIdValue == null) return;
+        Long storyboardId;
+        try { storyboardId = Long.valueOf(String.valueOf(storyboardIdValue)); }
+        catch (NumberFormatException ignored) { return; }
+        List<Long> ids = storyboardService.listItems(storyboardId).stream()
+                .filter(item -> {
+                    JSONObject data = StrUtil.isBlank(item.getCustomData()) ? new JSONObject() : JSONUtil.parseObj(item.getCustomData());
+                    return StrUtil.isBlank(data.getStr("firstFrameImageUrl")) || StrUtil.isBlank(data.getStr("lastFrameImageUrl"));
+                })
+                .map(StoryboardItem::getId)
+                .toList();
+        Map<String, Object> context = new LinkedHashMap<>(reqVO.getContext());
+        context.put("selectedStoryboardItemIds", ids);
+        reqVO.setContext(context);
+        log.info("[storyboard_frame_gen] 后端补全不完整镜头列表: storyboardId={}, count={}", storyboardId, ids.size());
     }
 
     private boolean isGlobalWorkspace(AiChatReqVO reqVO) {

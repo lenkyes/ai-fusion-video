@@ -1,5 +1,5 @@
 # ============================================
-# 星拓 - Docker Compose (使用宿主机现有的 MySQL 和 Redis)
+# 融光 - Docker Compose (使用宿主机现有的 MySQL 和 Redis)
 # ============================================
 
 services:
@@ -21,19 +21,18 @@ services:
       MYSQL_PORT: 3306
       MYSQL_DATABASE: ai_fusion_video        # 数据库名
       MYSQL_USERNAME: root
-      MYSQL_PASSWORD: FANAfany1298       # ⚠️ 请修改这里！填入你服务器MySQL的密码
+      MYSQL_PASSWORD: FANAfany1298...       # ⚠️ 请修改这里！填入你服务器MySQL的密码
       # ================== Redis配置 ==================
       REDIS_HOST: host.docker.internal       # 指向宿主机
-      REDIS_PORT: 6380
+      REDIS_PORT: 6379
       REDIS_PASSWORD: FANAfany1298       # ⚠️ 请修改这里！如果没有密码请留空或删除这行
       # ===============================================
       AI_DASHSCOPE_API_KEY: ${AI_DASHSCOPE_API_KEY:-sk-placeholder}
       JAVA_OPTS: ${JAVA_OPTS:--Xms512m -Xmx1024m}
+    ports:
+      - "127.0.0.1:18080:18080"
     volumes:
       - media_data:/app/data/media
-    # 仅暴露给宿主机 Nginx，不对公网开放后端端口
-    ports:
-      - "127.0.0.1:${BACKEND_PORT:-18080}:18080"
 
   # ---------- 前端 ----------
   frontend:
@@ -47,16 +46,13 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: ""
-    # 仅暴露给宿主机 Nginx，不对公网开放前端端口
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
 
   # ---------- Nginx 反向代理 ----------
   nginx:
-    # 新服务器使用宿主机 Nginx；只有显式启用该 profile 时才启动容器 Nginx
-    profiles: ["container-nginx"]
     image: nginx:alpine
     container_name: fusion-nginx
     restart: unless-stopped

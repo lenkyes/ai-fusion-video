@@ -1490,29 +1490,44 @@ export function StoryboardRefPanel({
 
   const handleGenerateAllFrames = useCallback(async () => {
     if (frameQueueRef.current.active) return;
-    const latestItems = await storyboardApi.listItems(storyboard.id);
-    const incompleteIds = latestItems
-      .filter((item) => {
-        const frames = getStoryboardFrames(item);
-        return !frames.firstFrameImageUrl || !frames.lastFrameImageUrl;
-      })
-      .map((item) => item.id);
-
     frameQueueRef.current = {
-      active: incompleteIds.length > 0,
-      pending: incompleteIds,
+      active: true,
+      pending: [],
       retries: new Map(),
-      total: incompleteIds.length,
+      total: 1,
       completed: 0,
       failed: 0,
-      running: 0,
+      running: 1,
     };
     publishFrameQueueProgress();
-    if (incompleteIds.length > 0) {
-      setNotificationOpen(true);
-      pumpFrameQueueRef.current();
-    }
-  }, [publishFrameQueueProgress, setNotificationOpen, storyboard.id]);
+    setNotificationOpen(true);
+    addPipeline({
+      label: "一键生成全部不完整首尾帧",
+      projectId,
+      request: {
+        agentType: "storyboard_frame_gen",
+        projectId,
+        context: {
+          storyboardId: storyboard.id,
+          overwriteFrames: false,
+          incompleteFramesOnly: true,
+        },
+      },
+      onSettled: async (status) => {
+        const queue = frameQueueRef.current;
+        queue.active = false;
+        queue.running = 0;
+        if (status === "done") queue.completed = 1;
+        else queue.failed = 1;
+        try {
+          await onItemUpdated?.();
+        } catch (error) {
+          console.error("刷新分镜首尾帧状态失败:", error);
+        }
+        publishFrameQueueProgress();
+      },
+    });
+  }, [addPipeline, onItemUpdated, projectId, publishFrameQueueProgress, setNotificationOpen, storyboard.id]);
 
   const showShot = selectedItem && !hideShotDetails;
   const frameQueueActive = !!frameQueueProgress &&

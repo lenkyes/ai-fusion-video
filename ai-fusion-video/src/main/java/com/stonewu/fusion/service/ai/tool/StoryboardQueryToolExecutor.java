@@ -1,5 +1,6 @@
 package com.stonewu.fusion.service.ai.tool;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -72,12 +73,21 @@ public class StoryboardQueryToolExecutor implements ToolExecutor {
             List<StoryboardItem> items = storyboardService.listItems(storyboardId);
             int originalTotalItems = items.size();
             Set<Long> selectedItemIds = selectedStoryboardItemIds(context);
+            boolean incompleteOnly = context != null && context.getRequestContext() != null
+                    && Boolean.TRUE.equals(context.getRequestContext().get("incompleteFramesOnly"));
             if (!selectedItemIds.isEmpty()) {
                 items = items.stream()
                         .filter(item -> selectedItemIds.contains(item.getId()))
                         .toList();
                 log.info("get_storyboard 按请求上下文裁剪: storyboardId={}, selected={}, returned={}, original={}",
                         storyboardId, selectedItemIds.size(), items.size(), originalTotalItems);
+            }
+            if (incompleteOnly) {
+                items = items.stream().filter(item -> {
+                    JSONObject data = StrUtil.isBlank(item.getCustomData()) ? new JSONObject() : JSONUtil.parseObj(item.getCustomData());
+                    return StrUtil.isBlank(data.getStr("firstFrameImageUrl"))
+                            || StrUtil.isBlank(data.getStr("lastFrameImageUrl"));
+                }).toList();
             }
 
             JSONArray itemList = new JSONArray();
@@ -99,6 +109,8 @@ public class StoryboardQueryToolExecutor implements ToolExecutor {
                         .set("generatedImageUrl", item.getGeneratedImageUrl())
                         .set("videoUrl", item.getVideoUrl())
                         .set("generatedVideoUrl", item.getGeneratedVideoUrl())
+                        .set("firstFrameImageUrl", frameValue(item, "firstFrameImageUrl"))
+                        .set("lastFrameImageUrl", frameValue(item, "lastFrameImageUrl"))
                         .set("videoPrompt", item.getVideoPrompt()));
             }
 
@@ -115,6 +127,12 @@ public class StoryboardQueryToolExecutor implements ToolExecutor {
             log.error("查询分镜详情失败", e);
             return JSONUtil.createObj().set("status", "error").set("message", "查询失败: " + e.getMessage()).toString();
         }
+    }
+
+    private String frameValue(StoryboardItem item, String key) {
+        if (StrUtil.isBlank(item.getCustomData())) return null;
+        try { return JSONUtil.parseObj(item.getCustomData()).getStr(key); }
+        catch (Exception ignored) { return null; }
     }
 
     private Set<Long> selectedStoryboardItemIds(ToolExecutionContext context) {

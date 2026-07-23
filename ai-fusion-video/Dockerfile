@@ -3,7 +3,9 @@
 # ============================================
 
 # ---------- 阶段 1: 构建 ----------
-FROM eclipse-temurin:21-jdk AS builder
+ARG BASE_JDK_IMAGE=eclipse-temurin:21-jdk
+ARG BASE_JRE_IMAGE=eclipse-temurin:21-jre
+FROM ${BASE_JDK_IMAGE} AS builder
 
 WORKDIR /build
 
@@ -19,7 +21,7 @@ COPY src/ src/
 RUN --mount=type=cache,target=/root/.m2 ./mvnw package -DskipTests -B
 
 # ---------- 阶段 2: 运行 ----------
-FROM eclipse-temurin:21-jre
+FROM ${BASE_JRE_IMAGE}
 
 WORKDIR /app
 
