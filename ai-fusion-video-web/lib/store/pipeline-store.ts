@@ -120,6 +120,7 @@ interface PipelineStoreState {
     projectId: number;
     request: AiChatReq;
     onComplete?: () => void;
+    onSettled?: (status: "done" | "error" | "cancelled") => void;
   }) => string;
   attachTaskStream: (config: {
     label: string;
@@ -835,7 +836,7 @@ export const usePipelineStore = create<PipelineStoreState>()((set, get) => ({
     }
   },
 
-  addPipeline: ({ label, projectId, request, onComplete }) => {
+  addPipeline: ({ label, projectId, request, onComplete, onSettled }) => {
     const id = generateId();
     const initialState: PipelineState = {
       status: "running",
@@ -855,11 +856,31 @@ export const usePipelineStore = create<PipelineStoreState>()((set, get) => ({
 
     set((s) => ({ tasks: [...s.tasks, task] }));
 
-    const handleEvent = createEventHandler(id, set, onComplete);
+    let terminalStatus: "done" | "error" | "cancelled" | null = null;
+    let settled = false;
+    const settleOnce = (status: "done" | "error" | "cancelled") => {
+      if (settled) return;
+      settled = true;
+      if (status === "done") onComplete?.();
+      onSettled?.(status);
+    };
+    const handleEvent = createEventHandler(id, set, undefined, (status) => {
+      terminalStatus = status;
+      settleOnce(status);
+    });
 
     // 启动 SSE 流
     const controller = pipelineStream(request, {
-      onEvent: handleEvent,
+      onEvent: (event) => {
+        if (isMainAgentTerminalEvent(event)) {
+          terminalStatus = event.outputType === "DONE"
+            ? "done"
+            : event.outputType === "CANCELLED"
+              ? "cancelled"
+              : "error";
+        }
+        handleEvent(event);
+      },
       onError: (err) => {
         // 仅在 running 状态时标记错误，避免覆盖已取消/已完成的状态
         set((s) => ({
@@ -879,8 +900,13 @@ export const usePipelineStore = create<PipelineStoreState>()((set, get) => ({
           ),
         }));
         abortControllers.delete(id);
+        settleOnce("error");
       },
       onComplete: () => {
+        if (terminalStatus && terminalStatus !== "done") {
+          settleOnce(terminalStatus);
+          return;
+        }
         // SSE 流结束，如果还在 running 则标记为 done
         set((s) => ({
           tasks: s.tasks.map((t) =>
@@ -895,7 +921,7 @@ export const usePipelineStore = create<PipelineStoreState>()((set, get) => ({
           ),
         }));
         abortControllers.delete(id);
-        onComplete?.();
+        settleOnce("done");
       },
     });
 

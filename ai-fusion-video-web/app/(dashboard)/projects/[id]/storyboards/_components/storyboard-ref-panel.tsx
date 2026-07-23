@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Info,
@@ -48,6 +48,7 @@ import { BatchGenDialog } from "./batch-gen-dialog";
 import type { AssetItemWithInfo, SelectedAssetItem } from "./batch-gen-dialog";
 import { VideoGenDialog } from "./video-gen-dialog";
 import { FrameGenDialog } from "./frame-gen-dialog";
+import { getStoryboardFrames } from "./frame-gen-dialog";
 import { usePipelineStore } from "@/lib/store/pipeline-store";
 
 // ========== 类型 ==========
@@ -1388,16 +1389,161 @@ export function StoryboardRefPanel({
 }) {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string>("");
+  const addPipeline = usePipelineStore((s) => s.addPipeline);
+  const setNotificationOpen = usePipelineStore((s) => s.setNotificationOpen);
+  const [frameQueueProgress, setFrameQueueProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: number;
+    running: number;
+    pending: number;
+  } | null>(null);
+  const frameQueueRef = useRef({
+    active: false,
+    pending: [] as number[],
+    retries: new Map<number, number>(),
+    total: 0,
+    completed: 0,
+    failed: 0,
+    running: 0,
+  });
+  const pumpFrameQueueRef = useRef<() => void>(() => undefined);
 
   const handlePreviewImage = useCallback((url: string, title: string) => {
     setPreviewImageUrl(url);
     setPreviewImageTitle(title);
   }, []);
 
+  const publishFrameQueueProgress = useCallback(() => {
+    const queue = frameQueueRef.current;
+    setFrameQueueProgress({
+      total: queue.total,
+      completed: queue.completed,
+      failed: queue.failed,
+      running: queue.running,
+      pending: queue.pending.length,
+    });
+  }, []);
+
+  const pumpFrameQueue = useCallback(() => {
+    const queue = frameQueueRef.current;
+    if (!queue.active) return;
+
+    while (queue.running < 5 && queue.pending.length > 0) {
+      const itemId = queue.pending.shift()!;
+      const retryCount = queue.retries.get(itemId) || 0;
+      queue.running += 1;
+      publishFrameQueueProgress();
+
+      addPipeline({
+        label: `生成镜头 #${itemId} 首尾帧${retryCount ? `（重试 ${retryCount}/3）` : ""}`,
+        projectId,
+        request: {
+          agentType: "storyboard_frame_gen",
+          projectId,
+          context: {
+            selectedStoryboardItemIds: [itemId],
+            storyboardId: storyboard.id,
+            overwriteFrames: false,
+          },
+        },
+        onSettled: async (status) => {
+          let complete = false;
+          if (status === "done") {
+            try {
+              const latestItem = await storyboardApi.getItem(itemId);
+              const frames = getStoryboardFrames(latestItem);
+              complete = !!frames.firstFrameImageUrl && !!frames.lastFrameImageUrl;
+            } catch {
+              complete = false;
+            }
+          }
+
+          queue.running -= 1;
+          if (complete) {
+            queue.completed += 1;
+          } else if (status !== "cancelled" && retryCount < 3) {
+            queue.retries.set(itemId, retryCount + 1);
+            queue.pending.push(itemId);
+          } else {
+            queue.failed += 1;
+          }
+
+          if (queue.running === 0 && queue.pending.length === 0) {
+            queue.active = false;
+            try {
+              await onItemUpdated?.();
+            } catch (error) {
+              console.error("刷新分镜首尾帧状态失败:", error);
+            }
+          }
+          publishFrameQueueProgress();
+          pumpFrameQueueRef.current();
+        },
+      });
+    }
+  }, [addPipeline, onItemUpdated, projectId, publishFrameQueueProgress, storyboard.id]);
+
+  useEffect(() => {
+    pumpFrameQueueRef.current = pumpFrameQueue;
+  }, [pumpFrameQueue]);
+
+  const handleGenerateAllFrames = useCallback(async () => {
+    if (frameQueueRef.current.active) return;
+    const latestItems = await storyboardApi.listItems(storyboard.id);
+    const incompleteIds = latestItems
+      .filter((item) => {
+        const frames = getStoryboardFrames(item);
+        return !frames.firstFrameImageUrl || !frames.lastFrameImageUrl;
+      })
+      .map((item) => item.id);
+
+    frameQueueRef.current = {
+      active: incompleteIds.length > 0,
+      pending: incompleteIds,
+      retries: new Map(),
+      total: incompleteIds.length,
+      completed: 0,
+      failed: 0,
+      running: 0,
+    };
+    publishFrameQueueProgress();
+    if (incompleteIds.length > 0) {
+      setNotificationOpen(true);
+      pumpFrameQueueRef.current();
+    }
+  }, [publishFrameQueueProgress, setNotificationOpen, storyboard.id]);
+
   const showShot = selectedItem && !hideShotDetails;
+  const frameQueueActive = !!frameQueueProgress &&
+    (frameQueueProgress.running > 0 || frameQueueProgress.pending > 0);
 
   return (
     <div className="w-full lg:w-72 border-l border-border/20 flex flex-col shrink-0 bg-card/20 overflow-y-auto h-full relative">
+      <div className="border-b border-border/20 p-3">
+        <button
+          type="button"
+          onClick={() => void handleGenerateAllFrames()}
+          disabled={frameQueueActive}
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {frameQueueActive ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ImageIcon className="h-3.5 w-3.5" />
+          )}
+          一键生成首尾帧
+        </button>
+        {frameQueueProgress && (
+          <p className="mt-2 text-center text-[10px] text-muted-foreground">
+            {frameQueueProgress.total === 0
+              ? "当前项目的首尾帧已完整"
+              : frameQueueProgress.running > 0 || frameQueueProgress.pending > 0
+                ? `已完成 ${frameQueueProgress.completed}/${frameQueueProgress.total}，生成中 ${frameQueueProgress.running}，等待 ${frameQueueProgress.pending}`
+                : `生成结束：成功 ${frameQueueProgress.completed}，失败 ${frameQueueProgress.failed}`}
+          </p>
+        )}
+      </div>
       {showShot ? (
         <>
           <ItemDetail
