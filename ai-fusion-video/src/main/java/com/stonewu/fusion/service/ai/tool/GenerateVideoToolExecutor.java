@@ -644,6 +644,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                 return StoryboardFrameInputs.EMPTY;
             }
             String firstFrameImageUrl = firstNonBlank(
+                    extractFirstFrameImageUrl(item.getCustomData()),
                     item.getGeneratedImageUrl(),
                     item.getImageUrl(),
                     item.getReferenceImageUrl());
@@ -811,6 +812,22 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
 
     private record StoryboardFrameInputs(String firstFrameImageUrl, String lastFrameImageUrl) {
         private static final StoryboardFrameInputs EMPTY = new StoryboardFrameInputs(null, null);
+    }
+
+    private String extractFirstFrameImageUrl(String customData) {
+        if (StrUtil.isBlank(customData)) {
+            return null;
+        }
+        try {
+            JSONObject data = JSONUtil.parseObj(customData);
+            return firstNonBlank(
+                    data.getStr("firstFrameImageUrl"),
+                    data.getStr("startFrameImageUrl"),
+                    data.getStr("headFrameImageUrl"),
+                    data.getStr("firstFrameUrl"));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private record PreviousShotInputs(Long storyboardItemId, String lastFrameImageUrl, String videoUrl) {

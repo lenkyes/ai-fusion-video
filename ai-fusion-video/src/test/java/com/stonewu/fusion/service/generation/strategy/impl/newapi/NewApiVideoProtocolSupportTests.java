@@ -57,6 +57,25 @@ class NewApiVideoProtocolSupportTests {
     }
 
     @Test
+    void shouldUseTheFirstOrderedReferenceAsGrokInputImage() {
+        VideoTask task = VideoTask.builder()
+                .prompt("transition from start to end")
+                .referenceImageUrls(JSONUtil.toJsonStr(List.of(
+                        "https://cdn.example.com/generated-first-frame.png",
+                        "https://cdn.example.com/generated-last-frame.png",
+                        "https://cdn.example.com/character-reference.png")))
+                .build();
+        NewApiVideoProtocolContext context = new NewApiVideoProtocolContext(
+                AiModel.builder().code("grok-imagine-video").build(), null, task,
+                new JSONObject(), new AiModelMetadata("newapi", "newapi", "grok_imagine", "grok_imagine"));
+
+        JSONObject body = support.buildGrokImagineSubmitBody(context);
+
+        assertEquals("https://cdn.example.com/generated-first-frame.png",
+                body.getJSONObject("image").getStr("url"));
+    }
+
+    @Test
     void shouldBuildSeedanceContentGenerationBody() {
         VideoTask task = VideoTask.builder()
                 .prompt("cinematic shot")

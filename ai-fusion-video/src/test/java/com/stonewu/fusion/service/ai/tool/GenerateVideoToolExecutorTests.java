@@ -580,8 +580,8 @@ class GenerateVideoToolExecutorTests {
                         true, true, true, false, false, 0, null, 9, 0, 0));
         when(storyboardService.getItemById(3310L)).thenReturn(StoryboardItem.builder()
                 .id(3310L)
-                .generatedImageUrl("/media/images/shot-start.png")
-                .customData("{\"lastFrameImageUrl\":\"/media/images/shot-end.png\"}")
+                .generatedImageUrl("/media/images/stale-storyboard.png")
+                .customData("{\"firstFrameImageUrl\":\"/media/images/shot-start.png\",\"lastFrameImageUrl\":\"/media/images/shot-end.png\"}")
                 .build());
         when(systemConfigService.resolvePublicUrl("/media/images/shot-start.png"))
                 .thenReturn("https://fusion.example.com/media/images/shot-start.png");
