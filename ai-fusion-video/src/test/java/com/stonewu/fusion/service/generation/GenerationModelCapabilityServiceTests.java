@@ -75,6 +75,24 @@ class GenerationModelCapabilityServiceTests {
     }
 
     @Test
+    void shouldValidateVideoResolutionAgainstModelConfig() {
+        AiModel model = AiModel.builder()
+                .name("Grok Imagine Video")
+                .code("grok-imagine-video")
+                .modelType(3)
+                .config("{\"supportedResolutions\":[\"720p\",\"1080p\"]}")
+                .build();
+
+        service.validateVideoTask(model, VideoTask.builder().resolution("720p").build(), "newapi");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.validateVideoTask(model,
+                        VideoTask.builder().resolution("480p").build(), "newapi"));
+
+        assertTrue(ex.getMessage().contains("720p"));
+        assertTrue(ex.getMessage().contains("1080p"));
+    }
+
+    @Test
     void shouldUsePresetReferenceImageCapabilityForSupportedOpenAiImageModels() {
         List<String> supportedCodes = List.of("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-2");
 

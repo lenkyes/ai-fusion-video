@@ -16,7 +16,7 @@
 3. 如果没有指定镜头ID，通过 `get_storyboard` 获取所有镜头；如果指定了镜头ID，只处理这些镜头。禁止主 Agent 调用 `get_storyboard_scene_items`：该工具会返回整场镜头和大量资产引用，批量回灌会导致上下文过大；每个子 Agent 会自行查询当前镜头明细。子 Agent 查询结果中的 `totalItems` 仅表示某一个场次的镜头数，绝不能覆盖、截断或替换主 Agent 的 `selectedStoryboardItemIds`；例如选中6个镜头、某场次返回 `totalItems=2` 时，本次目标总数仍是6
 4. 在调用子 Agent 前，根据 `get_project` 的真实结果整理一份轻量的批次共享 `consistencyContext`，只包含项目级画风、画面比例和全批次通用约束；角色、场景、道具和相邻镜头上下文由各子 Agent 调用 `get_storyboard_scene_items` 后补全，不要在主 Agent 中预查询或复制大段镜头/资产 JSON
 5. 不要等待或收集所有镜头的场次明细后再分发；目标清单建立后立即对每个ID调用子 Agent
-6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly、generateAudio、forceRegenerate、generationRequestId 和同一份 consistencyContext
+6. 对每个目标镜头调用 `generate_storyboard_video` 子 Agent，传入镜头ID、项目ID、promptOnly、generateAudio、resolution、forceRegenerate、generationRequestId 和同一份 consistencyContext；上下文提供 resolution 时必须原样传递
 7. 调度方式由上下文决定：parallelVideoGeneration=true 表示批量镜头必须并行调用独立子 Agent，让各子 Agent完成提示词组装后分别提交视频任务并独立轮询；不得等待前一个视频生成完成后才启动下一个。单镜头或 promptOnly 模式可串行执行。无论并行还是串行，单个子 Agent 返回错误时都必须记录该镜头失败并继续处理目标清单中的其余镜头，禁止提前结束整批任务
 8. 如果上下文包含 `videoOptimizationNotes`，必须在每个目标镜头的子 Agent message 中原样传递为 `videoOptimizationNotes`。这是用户对上一版视频的人工问题反馈，不得遗漏、概括或改写。
 8. 第一轮结束后，如果存在失败镜头，只有在失败发生于提交远端任务之前且原因明显可修正时，才可用同一份 consistencyContext 对失败镜头最多重试 1 次。若失败信息包含 `retryable=false`、`remoteTaskSubmitted=true`、平台任务 ID、HTTP 4xx、资源不可访问、或“已阻止重复创建远端视频任务”，不得重试，避免重复创建远端视频任务和重复消耗额度。即使输入中有 `forceRegenerate: true`，也不得在同一轮失败后再次为同一镜头创建远端任务。
@@ -54,6 +54,7 @@ negativeConsistencyRules:
   - `projectId: ...`
   - `promptOnly: true/false`（仅当上下文有 promptOnly 时传 true）
   - `generateAudio: true/false`（默认 true；当上下文有 generateAudio 时原样传给子 Agent）
+  - `resolution: ...`（若上下文提供，原样传给子 Agent）
   - `forceRegenerate: true/false`（当上下文有 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确说“重新生成/再次生成/覆盖生成/重做失败镜头”时传 true）
   - `generationRequestId: ...`（若上下文提供了该字段，原样传给子 Agent；不要自己编造）
   - `consistencyContext:` 后接本批次共享的一致性上下文

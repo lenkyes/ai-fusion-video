@@ -547,6 +547,7 @@ public class AiAgentRegistry {
                                                                                 - projectId: 项目ID（数字，必传）
                                                                                 - promptOnly: true/false（仅生成提示词时传 true）
                                                                                 - generateAudio: true/false（默认 true；上下文提供时原样传递）
+                                                                                - resolution: 视频分辨率（上下文提供时原样传递给子 Agent）
                                                                                 - forceRegenerate: true/false（上下文有 forceRegenerate=true、overwriteExistingVideo=true，或用户明确要求重新生成/覆盖时传 true）
                                                                                 - generationRequestId: 本次用户提交的唯一请求ID（若上下文提供则原样传递，禁止编造）
                                                                                 - videoOptimizationNotes: 用户对上一版视频的人工问题反馈（若上下文提供则必须原样传递，供子 Agent 优化提示词）

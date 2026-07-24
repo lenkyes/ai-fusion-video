@@ -4,7 +4,7 @@
 
 ## 1. 业务流程与输入约束
 
-1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `generateAudio`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
+1. **提取参数**：解析输入消息中的 `storyboardItemId`、`projectId`、可选的 `promptOnly`、可选的 `generateAudio`、可选的 `resolution`、可选的 `forceRegenerate`、可选的 `overwriteExistingVideo`、可选的 `generationRequestId` 和可选的 `consistencyContext`（忽略可能出现的 `session_id`，勿向下游传递，勿向用户询问）。
 2. **查询项目画风**：调用 `get_project(projectId)` 提取 `artStyleInfo` 的 `description`（画风描述，空则默认“高质量精细画面”）。`artStyleInfo.referenceImageUrl` 只可用于理解画风，不得放入视频 `referenceImageUrls`。
 3. **获取镜头与资产**：必须调用 `get_storyboard_scene_items({"storyboardItemId": 当前镜头ID})` 获取目标镜头（`isCurrentTarget=true`）及前后镜头上下文；不要把镜头ID填入 `storyboardSceneId` 或 `sceneId`。收集目标镜头的 `characterRefs`、`propRefs` 和 `sceneRef` 中有 `imageUrl` 的子资产图作为参考图。角色引用已由后端按 `appearanceItemId` 解析为该童年/青年/老年/换装形态的专属 canonical 三视图；必须原样使用返回的 `assetItemId`、`canonicalThreeViewItemId` 和 `imageUrl`，禁止在同一主资产下自行搜索或替换为其他三视图。
 4. **处理人工重抽反馈**：输入包含 `videoOptimizationNotes` 时，先读取目标镜头已有 `videoPrompt`，再结合反馈重写本次 prompt。把穿模、肢体异常、人物关系或动作不合理等问题转化为明确、可执行的正向动作、空间位置、接触关系和稳定终态约束；只保留必要的简短负面约束。不得忽略反馈，也不要仅把反馈原文机械追加到旧 prompt 末尾。
@@ -19,7 +19,7 @@
 6. **调用生成与更新**：
    - 首帧图选择：若 `supportsFirstFrame=true`，必须优先传 `suggestedFirstFrameImageUrl`；若该字段为空，则按 `generatedImageUrl` → `imageUrl` → `referenceImageUrl` 选择。
    - 尾帧图选择：若 `supportsLastFrame=true` 且 `suggestedLastFrameImageUrl` 或镜头自定义数据中存在 `lastFrameImageUrl/endFrameImageUrl/tailFrameImageUrl/lastFrameUrl`，传入 `lastFrameImageUrl`；不要为了凑尾帧把项目画风图或无关资产图当尾帧。
-   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, duration, storyboardItemId, projectId, generateAudio, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传；`generateAudio` 默认 true，输入中显式为 false 时才传 false）。**必须传入当前镜头的 `storyboardItemId` 和 `projectId`，用于防止同一轮里重复创建远端视频任务并归集成本。**
+   - 调用 `generate_video(prompt, firstFrameImageUrl, lastFrameImageUrl, referenceImageUrls, ratio, resolution, duration, storyboardItemId, projectId, generateAudio, forceRegenerate, generationRequestId)`（默认比例 16:9，duration 直接传；输入中有 `resolution` 时必须原样传递；`generateAudio` 默认 true，输入中显式为 false 时才传 false）。**必须传入当前镜头的 `storyboardItemId` 和 `projectId`，用于防止同一轮里重复创建远端视频任务并归集成本。**
    - 当输入包含 `forceRegenerate: true` 或 `overwriteExistingVideo: true`，或用户明确要求“重新生成/再次生成/覆盖生成/重做失败镜头”时，传 `forceRegenerate=true`，允许绕过已有失败或已完成历史任务；如果输入有 `generationRequestId`，必须原样传给 `generate_video`，用于阻止同一次用户提交内重复创建远端任务。
    - 如果本轮 `generate_video` 已返回 `retryable=false`，不得再用 `forceRegenerate=true` 立刻重试同一镜头。
    - 调用 `update_storyboard_item_video(storyboardItemId, videoUrl, videoPrompt)` 填入视频链接及 videoPrompt。

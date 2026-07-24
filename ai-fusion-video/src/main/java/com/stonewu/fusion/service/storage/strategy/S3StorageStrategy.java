@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -57,9 +58,17 @@ public class S3StorageStrategy implements StorageStrategy {
 
     @Override
     public String store(String remoteUrl, String subDir, StorageConfig config) {
+        return store(remoteUrl, subDir, config, Map.of());
+    }
+
+    @Override
+    public String store(String remoteUrl, String subDir, StorageConfig config,
+                        Map<String, String> requestHeaders) {
         validateConfig(config);
 
-        Request request = new Request.Builder().url(remoteUrl).build();
+        Request.Builder requestBuilder = new Request.Builder().url(remoteUrl);
+        requestHeaders.forEach(requestBuilder::header);
+        Request request = requestBuilder.build();
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 throw new RuntimeException("下载文件失败: HTTP " + response.code() + " url=" + remoteUrl);

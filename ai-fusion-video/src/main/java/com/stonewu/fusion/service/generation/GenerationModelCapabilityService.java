@@ -169,6 +169,13 @@ public class GenerationModelCapabilityService {
         boolean hasLastFrame = StrUtil.isNotBlank(task.getLastFrameImageUrl());
         int totalImageInputs = referenceImages.size() + (hasFirstFrame ? 1 : 0) + (hasLastFrame ? 1 : 0);
 
+        List<String> supportedResolutions = getStringList(getMergedModelConfig(model), "supportedResolutions");
+        if (StrUtil.isNotBlank(task.getResolution()) && !supportedResolutions.isEmpty()
+                && supportedResolutions.stream().noneMatch(value -> value.equalsIgnoreCase(task.getResolution()))) {
+            throw new BusinessException("当前视频模型 " + modelLabel(model)
+                    + " 不支持分辨率 " + task.getResolution() + "，可选值：" + String.join("、", supportedResolutions));
+        }
+
         if (hasFirstFrame && !capability.supportsFirstFrame()) {
             throw new BusinessException("当前视频模型 " + modelLabel(model)
                     + " 不支持首帧图输入，请不要传 firstFrameImageUrl。");

@@ -97,6 +97,9 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             GenerationModelCapabilityService.VideoModelCapability capability = model != null
                 ? generationModelCapabilityService.resolveVideoCapability(model)
                 : null;
+            List<String> supportedResolutions = model != null
+                ? generationModelCapabilityService.getMergedModelConfig(model).getBeanList("supportedResolutions", String.class)
+                : List.of();
 
             String firstFrameDescription = capability != null && !capability.supportsFirstFrame()
                 ? "当前默认模型不支持 firstFrameImageUrl，请不要传该字段"
@@ -113,6 +116,12 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             String referenceAudioDescription = capability != null && !capability.supportsReferenceAudios()
                 ? "当前默认模型不支持 referenceAudioUrls，请不要传该字段"
                 : "参考音频URL列表，用于参考音色、音乐旋律、对话内容等";
+            JSONObject resolutionSchema = JSONUtil.createObj()
+                .set("type", "string")
+                .set("description", "视频分辨率；必须使用当前模型支持的选项");
+            if (!supportedResolutions.isEmpty()) {
+                resolutionSchema.set("enum", JSONUtil.parseArray(JSONUtil.toJsonStr(supportedResolutions)));
+            }
 
             return JSONUtil.createObj()
                 .set("type", "object")
@@ -159,6 +168,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .set("ratio", JSONUtil.createObj()
                         .set("type", "string")
                         .set("description", "画面比例，如 16:9、9:16、1:1（默认 16:9）"))
+                    .set("resolution", resolutionSchema)
                     .set("duration", JSONUtil.createObj()
                         .set("type", "integer")
                         .set("description", "视频时长（秒），默认 5"))
@@ -189,6 +199,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
             }
 
             String ratio = params.getStr("ratio", "16:9");
+            String resolution = params.getStr("resolution");
             Integer duration = params.getInt("duration", 5);
             Boolean cameraFixed = params.getBool("cameraFixed", false);
             Boolean generateAudio = params.getBool("generateAudio", true);
@@ -309,6 +320,7 @@ public class GenerateVideoToolExecutor implements ToolExecutor {
                     .referenceVideoUrls(referenceVideoUrls)
                     .referenceAudioUrls(referenceAudioUrls)
                     .ratio(ratio)
+                    .resolution(resolution)
                     .duration(duration)
                     .cameraFixed(cameraFixed)
                     .generateAudio(generateAudio)

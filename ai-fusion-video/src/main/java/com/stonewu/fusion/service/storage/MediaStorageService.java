@@ -43,6 +43,10 @@ public class MediaStorageService {
      * @return 持久化后的可访问 URL
      */
     public String downloadAndStore(String remoteUrl, String subDir) {
+        return downloadAndStore(remoteUrl, subDir, Map.of());
+    }
+
+    public String downloadAndStore(String remoteUrl, String subDir, Map<String, String> requestHeaders) {
         if (StrUtil.isBlank(remoteUrl)) {
             return remoteUrl;
         }
@@ -61,7 +65,8 @@ public class MediaStorageService {
 
         log.info("[MediaStorage] 开始持久化: url={}, subDir={}, strategy={}",
                 remoteUrl, subDir, strategy.getType());
-        return strategy.store(remoteUrl, subDir, config);
+        return strategy.store(remoteUrl, subDir, config,
+                requestHeaders == null ? Map.of() : requestHeaders);
     }
 
     private String normalizeExistingS3Url(String remoteUrl, StorageConfig config) {

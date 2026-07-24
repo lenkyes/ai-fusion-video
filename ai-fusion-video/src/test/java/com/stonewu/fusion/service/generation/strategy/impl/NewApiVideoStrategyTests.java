@@ -7,11 +7,13 @@ import com.stonewu.fusion.service.ai.model.AiModelMetadata;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NewApiVideoStrategyTests {
 
-    private final NewApiVideoStrategy strategy = new NewApiVideoStrategy(null, null, null, null, null);
+    private final NewApiVideoStrategy strategy = new NewApiVideoStrategy(null, null, null, null, null, null);
 
     @Test
     void shouldUseContentGenerationTaskPathForSeedanceModels() {
@@ -80,6 +82,41 @@ class NewApiVideoStrategyTests {
 
         assertEquals("done", result.status());
         assertEquals("https://cdn.example.com/grok.mp4", result.videoUrl());
+    }
+
+    @Test
+    void shouldResolveRelativeGrokVideoContentUrlAgainstUpstreamOrigin() {
+        NewApiVideoStrategy.NewApiVideoResult result = strategy.parseQueryResult("""
+                {
+                  "model": "grok-imagine-video",
+                  "progress": 100,
+                  "status": "done",
+                  "usage": {"cost_in_usd_ticks": 3020000000},
+                  "video": {
+                    "duration": 6,
+                    "respect_moderation": true,
+                    "url": "/v1/videos/271eab65-e70f-95b4-8b0c-f0a6fc21afcf/content"
+                  }
+                }
+                """, "https://api.x.ai/v1/videos/request-123");
+
+        assertEquals("done", result.status());
+        assertEquals(6, result.duration());
+        assertEquals("https://api.x.ai/v1/videos/271eab65-e70f-95b4-8b0c-f0a6fc21afcf/content",
+                result.videoUrl());
+    }
+
+    @Test
+    void shouldOnlyAuthenticateMediaDownloadsFromApiOrigin() {
+        assertTrue(strategy.isSameOrigin(
+                "https://aigpt8.cn/v1",
+                "https://aigpt8.cn/v1/videos/video-123/content"));
+        assertFalse(strategy.isSameOrigin(
+                "https://aigpt8.cn/v1",
+                "https://cdn.example.com/videos/video-123.mp4"));
+        assertFalse(strategy.isSameOrigin(
+                "https://aigpt8.cn/v1",
+                "http://aigpt8.cn/v1/videos/video-123/content"));
     }
 
     @Test

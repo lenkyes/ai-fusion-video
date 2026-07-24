@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -45,9 +46,17 @@ public class LocalStorageStrategy implements StorageStrategy {
 
     @Override
     public String store(String remoteUrl, String subDir, StorageConfig config) {
+        return store(remoteUrl, subDir, config, Map.of());
+    }
+
+    @Override
+    public String store(String remoteUrl, String subDir, StorageConfig config,
+                        Map<String, String> requestHeaders) {
         String basePath = resolveBasePath(config);
 
-        Request request = new Request.Builder().url(remoteUrl).build();
+        Request.Builder requestBuilder = new Request.Builder().url(remoteUrl);
+        requestHeaders.forEach(requestBuilder::header);
+        Request request = requestBuilder.build();
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 throw new RuntimeException("下载文件失败: HTTP " + response.code() + " url=" + remoteUrl);

@@ -268,7 +268,7 @@ function SceneAssetPanel({
   /** 批量生视频确认 */
   const handleVideoGenConfirm = (
     selectedItemIds: number[],
-    options?: { promptOnly?: boolean; generateAudio?: boolean; optimizationNotes?: string }
+    options?: { promptOnly?: boolean; generateAudio?: boolean; resolution?: string; optimizationNotes?: string }
   ) => {
     const promptOnly = options?.promptOnly ?? false;
     const generateAudio = options?.generateAudio ?? true;
@@ -290,6 +290,7 @@ function SceneAssetPanel({
           storyboardId: storyboard.id,
           promptOnly,
           generateAudio,
+          resolution: options?.resolution,
           forceRegenerate: true,
           overwriteExistingVideo: true,
           generationRequestId,

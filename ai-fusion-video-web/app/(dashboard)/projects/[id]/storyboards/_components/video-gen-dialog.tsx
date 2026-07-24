@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Video, X, ImageIcon, Check, Film, FileText, Volume2, MessageSquareWarning } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveMediaUrl } from "@/lib/api/client";
 import type { StoryboardItem } from "@/lib/api/storyboard";
 import { Textarea } from "@/components/ui/textarea";
+import { aiModelApi } from "@/lib/api/ai-model";
 
 interface VideoGenDialogProps {
   open: boolean;
@@ -14,7 +15,7 @@ interface VideoGenDialogProps {
   items: StoryboardItem[];
   onConfirm: (
     selectedItemIds: number[],
-    options?: { promptOnly?: boolean; generateAudio?: boolean; optimizationNotes?: string }
+    options?: { promptOnly?: boolean; generateAudio?: boolean; resolution?: string; optimizationNotes?: string }
   ) => void;
 }
 
@@ -39,8 +40,36 @@ export function VideoGenDialog({
   );
   const [selectedOverride, setSelectedOverride] = useState<Set<number> | null>(null);
   const [generateAudio, setGenerateAudio] = useState(true);
+  const [supportedResolutions, setSupportedResolutions] = useState<string[]>([]);
+  const [resolution, setResolution] = useState<string>();
   const [optimizationNotes, setOptimizationNotes] = useState("");
   const selected = selectedOverride ?? defaultSelected;
+
+  useEffect(() => {
+    if (!open) return;
+    aiModelApi.listByType(3).then((models) => {
+      const model = models.find((item) => item.defaultModel) ?? models[0];
+      if (!model?.config) {
+        setSupportedResolutions([]);
+        setResolution(undefined);
+        return;
+      }
+      try {
+        const config = JSON.parse(model.config) as { supportedResolutions?: unknown };
+        const options = Array.isArray(config.supportedResolutions)
+          ? config.supportedResolutions.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          : [];
+        setSupportedResolutions(options);
+        setResolution((current) => current && options.includes(current) ? current : options[0]);
+      } catch {
+        setSupportedResolutions([]);
+        setResolution(undefined);
+      }
+    }).catch(() => {
+      setSupportedResolutions([]);
+      setResolution(undefined);
+    });
+  }, [open]);
 
   if (!open) return null;
 
@@ -65,6 +94,7 @@ export function VideoGenDialog({
     onConfirm(Array.from(selected), {
       promptOnly,
       generateAudio,
+      resolution,
       optimizationNotes: optimizationNotes.trim() || undefined,
     });
     onClose();
@@ -144,6 +174,31 @@ export function VideoGenDialog({
               className="h-4 w-4 accent-purple-500"
             />
           </label>
+        )}
+
+        {items.length > 0 && supportedResolutions.length > 0 && (
+          <div className="px-5 py-2.5 border-b border-border/10 flex items-center justify-between gap-3">
+            <span className="text-xs text-foreground">分辨率</span>
+            <div className="flex items-center gap-1" role="radiogroup" aria-label="视频分辨率">
+              {supportedResolutions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={resolution === option}
+                  onClick={() => setResolution(option)}
+                  className={cn(
+                    "h-7 px-2.5 rounded-md text-xs transition-colors",
+                    resolution === option
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {items.length > 0 && (

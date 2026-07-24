@@ -4,6 +4,7 @@ import com.stonewu.fusion.entity.storage.StorageConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -58,5 +59,24 @@ class MediaStorageServiceTests {
                 "https://minio-srv.701111.xyz/ace/fusion/images/image.png");
         verify(strategy, never()).store(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void downloadAndStoreForwardsProviderRequestHeaders() {
+        StorageConfigService configService = mock(StorageConfigService.class);
+        StorageStrategy strategy = mock(StorageStrategy.class);
+        StorageConfig config = StorageConfig.builder().type("local").build();
+        Map<String, String> headers = Map.of("Authorization", "Bearer test-key");
+        when(strategy.getType()).thenReturn("local");
+        when(configService.getDefaultConfig()).thenReturn(config);
+        when(strategy.store("https://api.example.com/video", "videos", config, headers))
+                .thenReturn("/media/videos/video.mp4");
+        MediaStorageService service = new MediaStorageService(configService, List.of(strategy));
+
+        String result = service.downloadAndStore(
+                "https://api.example.com/video", "videos", headers);
+
+        assertThat(result).isEqualTo("/media/videos/video.mp4");
+        verify(strategy).store("https://api.example.com/video", "videos", config, headers);
     }
 }

@@ -3,6 +3,7 @@ package com.stonewu.fusion.service.storage;
 import com.stonewu.fusion.entity.storage.StorageConfig;
 
 import java.nio.file.Path;
+import java.util.Map;
 
 /**
  * 存储策略接口
@@ -25,6 +26,11 @@ public interface StorageStrategy {
      * @return 持久化后的可访问 URL
      */
     String store(String remoteUrl, String subDir, StorageConfig config);
+
+    /** Download and store a remote file with provider-specific request headers. */
+    default String store(String remoteUrl, String subDir, StorageConfig config, Map<String, String> requestHeaders) {
+        return store(remoteUrl, subDir, config);
+    }
 
     /**
      * 从字节数组保存文件（适用于 VertexAI 返回 base64 的场景）

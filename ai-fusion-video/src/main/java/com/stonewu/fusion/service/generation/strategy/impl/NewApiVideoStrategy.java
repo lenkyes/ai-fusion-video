@@ -19,9 +19,11 @@ import com.stonewu.fusion.service.generation.strategy.VideoGenerationStrategy;
 import com.stonewu.fusion.service.generation.strategy.impl.newapi.NewApiVideoProtocolAdapter;
 import com.stonewu.fusion.service.generation.strategy.impl.newapi.NewApiVideoProtocolContext;
 import com.stonewu.fusion.service.generation.strategy.impl.newapi.NewApiVideoProtocolRouter;
+import com.stonewu.fusion.service.storage.MediaStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -75,6 +77,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
     private final VideoGenerationService videoGenerationService;
     private final AiModelMetadataResolver aiModelMetadataResolver;
     private final NewApiVideoProtocolRouter protocolRouter;
+    private final MediaStorageService mediaStorageService;
 
     private final OkHttpClient okHttpClient = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -161,10 +164,10 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 }
 
                 item.setPlatformTaskId(currentPlatformTaskId);
-                item.setVideoUrl(result.videoUrl());
-                item.setCoverUrl(result.coverUrl());
-                item.setFirstFrameUrl(result.firstFrameUrl());
-                item.setLastFrameUrl(result.lastFrameUrl());
+                item.setVideoUrl(persistProviderMedia(apiConfig, result.videoUrl(), "videos"));
+                item.setCoverUrl(persistProviderMedia(apiConfig, result.coverUrl(), "images"));
+                item.setFirstFrameUrl(persistProviderMedia(apiConfig, result.firstFrameUrl(), "images"));
+                item.setLastFrameUrl(persistProviderMedia(apiConfig, result.lastFrameUrl(), "images"));
                 item.setDuration(result.duration() != null ? result.duration() : task.getDuration());
                 item.setStatus(1);
                 item.setErrorMsg(null);
@@ -267,7 +270,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 throw new BusinessException("New API 视频任务查询失败: HTTP " + response.code() + " "
                         + extractErrorMessage(responseBody));
             }
-            return parseQueryResult(responseBody);
+            return parseQueryResult(responseBody, queryUrl);
         } catch (IOException e) {
             throw new BusinessException("New API video query failed, requestId=" + platformTaskId
                     + ", url=" + queryUrl + ": " + e.getMessage());
@@ -433,6 +436,7 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
         Integer duration = firstPositive(
                 root.getInt("duration"),
+                nestedInteger(root, "video", "duration"),
                 nestedInteger(root, "content", "duration"),
                 nestedInteger(root, "data", "duration"),
                 metadata != null ? metadata.getInt("duration") : null,
@@ -450,6 +454,54 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
                 nestedFieldString(root, "data", "detail"));
 
         return new NewApiVideoResult(status, videoUrl, coverUrl, firstFrameUrl, lastFrameUrl, duration, errorMessage);
+    }
+
+    NewApiVideoResult parseQueryResult(String responseBody, String queryUrl) {
+        NewApiVideoResult result = parseQueryResult(responseBody);
+        return new NewApiVideoResult(
+                result.status(),
+                resolveMediaUrl(result.videoUrl(), queryUrl),
+                resolveMediaUrl(result.coverUrl(), queryUrl),
+                resolveMediaUrl(result.firstFrameUrl(), queryUrl),
+                resolveMediaUrl(result.lastFrameUrl(), queryUrl),
+                result.duration(),
+                result.errorMessage());
+    }
+
+    private String resolveMediaUrl(String mediaUrl, String requestUrl) {
+        String normalized = StrUtil.trim(mediaUrl);
+        if (StrUtil.isBlank(normalized)
+                || StrUtil.startWithIgnoreCase(normalized, "http://")
+                || StrUtil.startWithIgnoreCase(normalized, "https://")) {
+            return normalized;
+        }
+        HttpUrl resolved = HttpUrl.get(requestUrl).resolve(normalized);
+        if (resolved == null) {
+            throw new BusinessException("New API returned an invalid relative media URL: " + normalized);
+        }
+        return resolved.toString();
+    }
+
+    private String persistProviderMedia(ApiConfig apiConfig, String mediaUrl, String subDir) {
+        if (StrUtil.isBlank(mediaUrl)) {
+            return mediaUrl;
+        }
+        Map<String, String> requestHeaders = isSameOrigin(apiConfig.getApiUrl(), mediaUrl)
+                ? Map.of("Authorization", "Bearer " + apiConfig.getApiKey())
+                : Map.of();
+        return mediaStorageService.downloadAndStore(mediaUrl, subDir, requestHeaders);
+    }
+
+    boolean isSameOrigin(String apiUrl, String mediaUrl) {
+        try {
+            HttpUrl api = HttpUrl.get(normalizeRootBaseUrl(apiUrl));
+            HttpUrl media = HttpUrl.get(mediaUrl);
+            return api.scheme().equalsIgnoreCase(media.scheme())
+                    && api.host().equalsIgnoreCase(media.host())
+                    && api.port() == media.port();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     String extractTaskId(String responseBody) {
