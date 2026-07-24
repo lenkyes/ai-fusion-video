@@ -185,8 +185,10 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
     private String submitTask(ApiConfig apiConfig, JSONObject requestBody,
                               JSONObject modelConfig, AiModelMetadata metadata) {
+        String submitUrl = resolveSubmitUrl(apiConfig, modelConfig, metadata);
+        log.info("[NewApi Video] Submit request: url={}, model={}", submitUrl, requestBody.getStr("model"));
         Request request = new Request.Builder()
-                .url(resolveSubmitUrl(apiConfig, modelConfig, metadata))
+                .url(submitUrl)
                 .addHeader("Authorization", "Bearer " + apiConfig.getApiKey())
                 .addHeader("Content-Type", "application/json")
                 .post(RequestBody.create(requestBody.toString(), JSON_MEDIA_TYPE))
@@ -238,8 +240,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             if ("fail".equals(normalizedStatus) || "failed".equals(normalizedStatus) || "error".equals(normalizedStatus)
                     || "canceled".equals(normalizedStatus) || "cancelled".equals(normalizedStatus)
                     || "expired".equals(normalizedStatus)) {
-                throw new BusinessException("New API 视频任务失败: "
-                        + StrUtil.blankToDefault(result.errorMessage(), "未知错误"));
+                throw new BusinessException("New API upstream task failed, requestId=" + platformTaskId + ": "
+                        + StrUtil.blankToDefault(result.errorMessage(), "unknown error"));
             }
 
             sleepQuietly(pollIntervalMillis);
@@ -250,8 +252,10 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
     private NewApiVideoResult queryTask(ApiConfig apiConfig, String platformTaskId,
                                         JSONObject modelConfig, AiModelMetadata metadata) {
+        String queryUrl = resolveQueryUrl(apiConfig, modelConfig, metadata, platformTaskId);
+        log.info("[NewApi Video] Query request: requestId={}, url={}", platformTaskId, queryUrl);
         Request request = new Request.Builder()
-                .url(resolveQueryUrl(apiConfig, modelConfig, metadata, platformTaskId))
+                .url(queryUrl)
                 .addHeader("Authorization", "Bearer " + apiConfig.getApiKey())
                 .get()
                 .build();
@@ -265,7 +269,8 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
             }
             return parseQueryResult(responseBody);
         } catch (IOException e) {
-            throw new BusinessException("New API 视频任务查询异常: " + e.getMessage());
+            throw new BusinessException("New API video query failed, requestId=" + platformTaskId
+                    + ", url=" + queryUrl + ": " + e.getMessage());
         }
     }
 

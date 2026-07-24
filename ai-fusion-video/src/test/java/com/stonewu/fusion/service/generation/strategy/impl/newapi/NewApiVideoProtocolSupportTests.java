@@ -40,7 +40,7 @@ class NewApiVideoProtocolSupportTests {
     }
 
     @Test
-    void shouldTreatGrokImagineVideoAliasAsVersion15() {
+    void shouldPreserveConfiguredGrokImagineVideoModelCode() {
         VideoTask task = VideoTask.builder()
                 .prompt("cinematic shot")
                 .firstFrameImageUrl("https://cdn.example.com/media/first.png")
@@ -51,7 +51,7 @@ class NewApiVideoProtocolSupportTests {
 
         JSONObject body = support.buildGrokImagineSubmitBody(context);
 
-        assertEquals("grok-imagine-video-1.5", body.getStr("model"));
+        assertEquals("grok-imagine-video", body.getStr("model"));
         assertEquals("https://cdn.example.com/media/first.png",
                 body.getJSONObject("image").getStr("url"));
     }

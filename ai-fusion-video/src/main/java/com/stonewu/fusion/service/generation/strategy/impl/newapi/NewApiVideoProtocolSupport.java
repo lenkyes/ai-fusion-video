@@ -184,8 +184,7 @@ public class NewApiVideoProtocolSupport {
 
     private String normalizeGrokImagineModelCode(String modelCode) {
         String normalized = StrUtil.trim(modelCode);
-        if ("grok-imagine-video".equalsIgnoreCase(normalized)
-                || "grok-imagine-video-1-5-preview".equalsIgnoreCase(normalized)
+        if ("grok-imagine-video-1-5-preview".equalsIgnoreCase(normalized)
                 || "grok-imagine-video-1.5-preview".equalsIgnoreCase(normalized)) {
             return XAI_GROK_IMAGINE_VIDEO_1_5;
         }
