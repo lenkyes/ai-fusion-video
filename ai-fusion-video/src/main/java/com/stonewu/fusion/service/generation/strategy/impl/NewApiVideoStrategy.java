@@ -555,6 +555,11 @@ public class NewApiVideoStrategy implements VideoGenerationStrategy {
 
     private String normalizeRootBaseUrl(String baseUrl) {
         String normalized = StrUtil.blankToDefault(StrUtil.trim(baseUrl), DEFAULT_BASE_URL).replaceAll("/+$", "");
+        if (!StrUtil.startWithIgnoreCase(normalized, "http://")
+                && !StrUtil.startWithIgnoreCase(normalized, "https://")) {
+            throw new BusinessException("New API api_url must be a complete http/https URL, current value: "
+                    + StrUtil.blankToDefault(StrUtil.trim(baseUrl), "<empty>"));
+        }
         if (normalized.endsWith("/v1")) {
             normalized = normalized.substring(0, normalized.length() - 3);
         }

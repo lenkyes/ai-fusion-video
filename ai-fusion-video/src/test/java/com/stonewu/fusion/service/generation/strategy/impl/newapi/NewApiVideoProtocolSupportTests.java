@@ -40,6 +40,23 @@ class NewApiVideoProtocolSupportTests {
     }
 
     @Test
+    void shouldTreatGrokImagineVideoAliasAsVersion15() {
+        VideoTask task = VideoTask.builder()
+                .prompt("cinematic shot")
+                .firstFrameImageUrl("https://cdn.example.com/media/first.png")
+                .build();
+        NewApiVideoProtocolContext context = new NewApiVideoProtocolContext(
+                AiModel.builder().code("grok-imagine-video").build(), null, task,
+                new JSONObject(), new AiModelMetadata("newapi", "newapi", "grok_imagine", "grok_imagine"));
+
+        JSONObject body = support.buildGrokImagineSubmitBody(context);
+
+        assertEquals("grok-imagine-video-1.5", body.getStr("model"));
+        assertEquals("https://cdn.example.com/media/first.png",
+                body.getJSONObject("image").getStr("url"));
+    }
+
+    @Test
     void shouldBuildSeedanceContentGenerationBody() {
         VideoTask task = VideoTask.builder()
                 .prompt("cinematic shot")

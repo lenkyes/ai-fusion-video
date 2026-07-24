@@ -386,6 +386,7 @@ public class VideoGenerationConsumer {
 
         try {
             VideoGenerationStrategy strategy = videoGenerationStrategyRouter.resolve(model);
+            normalizeTaskMediaUrls(task);
             generationModelCapabilityService.validateVideoTask(model, task);
             String platformTaskId = strategy.submit(task);
             log.info("[VideoConsumer] 任务已提交到平台: taskId={}, platformTaskId={}", taskId, platformTaskId);

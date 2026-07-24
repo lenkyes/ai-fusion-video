@@ -7,6 +7,7 @@ import com.stonewu.fusion.service.ai.model.AiModelMetadata;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NewApiVideoStrategyTests {
 
@@ -50,6 +51,15 @@ class NewApiVideoStrategyTests {
                 strategy.resolveSubmitUrl(apiConfig, new JSONObject(), metadata));
         assertEquals("http://localhost:8080/v1/videos/task-123",
                 strategy.resolveQueryUrl(apiConfig, new JSONObject(), metadata, "task-123"));
+    }
+
+    @Test
+    void shouldRejectRelativeApiBaseUrlBeforeBuildingRequest() {
+        ApiConfig apiConfig = ApiConfig.builder().apiUrl("/").build();
+        AiModelMetadata metadata = new AiModelMetadata("newapi", "newapi", "grok_imagine", "grok_imagine");
+
+        assertThrows(com.stonewu.fusion.common.BusinessException.class,
+                () -> strategy.resolveSubmitUrl(apiConfig, new JSONObject(), metadata));
     }
 
     @Test
