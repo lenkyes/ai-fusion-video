@@ -37,6 +37,7 @@ class NewApiVideoProtocolSupportTests {
         assertEquals("16:9", body.getStr("aspect_ratio"));
         assertEquals("720p", body.getStr("resolution"));
         assertEquals(8, body.getInt("duration"));
+        assertEquals(8, body.getInt("seconds"));
     }
 
     @Test

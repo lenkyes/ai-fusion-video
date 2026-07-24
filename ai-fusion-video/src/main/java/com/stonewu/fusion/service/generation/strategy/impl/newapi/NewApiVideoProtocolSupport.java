@@ -176,6 +176,7 @@ public class NewApiVideoProtocolSupport {
                 getPositiveInteger(context.modelConfig(), "defaultDuration", "duration"));
         if (duration != null) {
             body.set("duration", duration);
+            body.set("seconds", duration);
         }
         appendOptionalString(body, "aspect_ratio", context.task().getRatio());
         appendOptionalString(body, "resolution", context.task().getResolution());
