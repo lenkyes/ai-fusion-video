@@ -7,6 +7,9 @@ import com.stonewu.fusion.controller.generation.vo.ImageTaskSubmitReqVO;
 import com.stonewu.fusion.convert.generation.GenerationConvert;
 import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
+import com.stonewu.fusion.entity.generation.ImageGenerationSession;
+import com.stonewu.fusion.mapper.generation.ImageGenerationSessionMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stonewu.fusion.service.generation.ImageGenerationService;
 import com.stonewu.fusion.service.generation.consumer.ImageGenerationConsumer;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,12 +33,33 @@ public class ImageGenerationController {
 
     private final ImageGenerationService imageGenerationService;
     private final ImageGenerationConsumer imageGenerationConsumer;
+    private final ImageGenerationSessionMapper sessionMapper;
+
+    @GetMapping("/sessions")
+    public CommonResult<List<ImageGenerationSession>> sessions() {
+        return CommonResult.success(sessionMapper.selectList(new LambdaQueryWrapper<ImageGenerationSession>()
+                .eq(ImageGenerationSession::getUserId, requireCurrentUserId())
+                .orderByDesc(ImageGenerationSession::getUpdateTime)));
+    }
+
+    @PostMapping("/sessions")
+    public CommonResult<Long> createSession(@RequestBody ImageGenerationSession session) {
+        session.setId(null); session.setUserId(requireCurrentUserId());
+        if (org.springframework.util.StringUtils.hasText(session.getTitle()) == false) session.setTitle("新会话");
+        sessionMapper.insert(session); return CommonResult.success(session.getId());
+    }
 
     @Operation(summary = "提交生图任务")
     @PostMapping("/submit")
     public CommonResult<String> submit(@Valid @RequestBody ImageTaskSubmitReqVO reqVO) {
         ImageTask task = GenerationConvert.INSTANCE.convert(reqVO);
         task.setUserId(requireCurrentUserId());
+        if (task.getSessionId() != null) {
+            ImageGenerationSession session = sessionMapper.selectById(task.getSessionId());
+            if (session == null || !requireCurrentUserId().equals(session.getUserId())) {
+                throw new org.springframework.security.access.AccessDeniedException("无权使用该会话");
+            }
+        }
         String taskId = imageGenerationConsumer.submitTask(task);
         return CommonResult.success(taskId);
     }

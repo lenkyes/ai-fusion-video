@@ -12,6 +12,7 @@ import lombok.Data;
 public class ImageTaskSubmitReqVO {
 
     private Long projectId;
+    private Long sessionId;
 
     @NotBlank(message = "提示词不能为空")
     private String prompt;
