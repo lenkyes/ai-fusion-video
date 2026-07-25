@@ -136,6 +136,7 @@ public class GoogleFlowReverseApiClient {
         BufferedSource source = body.source();
         String requestId = null;
         String finalContent = null;
+        StringBuilder streamedContent = new StringBuilder();
         List<String> eventLines = new ArrayList<>();
 
         while (!source.exhausted()) {
@@ -175,6 +176,9 @@ public class GoogleFlowReverseApiClient {
                 JsonNode delta = choice.get("delta");
                 JsonNode message = choice.get("message");
                 String content = textOf(delta != null ? delta.get("content") : null, null);
+                if (StrUtil.isNotBlank(content) && delta != null) {
+                    streamedContent.append(content);
+                }
                 if (StrUtil.isBlank(content)) {
                     content = textOf(message != null ? message.get("content") : null, null);
                 }
@@ -182,14 +186,17 @@ public class GoogleFlowReverseApiClient {
                     content = directUrl;
                 }
 
-                if ("stop".equalsIgnoreCase(finishReason) && StrUtil.isNotBlank(content)) {
-                    finalContent = content;
+                if ("stop".equalsIgnoreCase(finishReason)) {
+                    finalContent = streamedContent.length() > 0 ? streamedContent.toString() : content;
                 }
             } else if (line.startsWith("data:")) {
                 eventLines.add(line.substring(5).trim());
             }
         }
 
+        if (StrUtil.isBlank(finalContent) && streamedContent.length() > 0) {
+            finalContent = streamedContent.toString();
+        }
         if (StrUtil.isBlank(finalContent)) {
             throw new BusinessException("GoogleFlowReverseApi 未返回最终结果");
         }
