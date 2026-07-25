@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Download, ImagePlus, Loader2, Plus, WandSparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
+import ImageInput from "@/components/dashboard/image-input";
 import { aiModelApi, type AiModel } from "@/lib/api/ai-model";
 import { imageGenerationApi, type ImageItem } from "@/lib/api/image-generation";
 import { resolveMediaUrl } from "@/lib/api/client";
