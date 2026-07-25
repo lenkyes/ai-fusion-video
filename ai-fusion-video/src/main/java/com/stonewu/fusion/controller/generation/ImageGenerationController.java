@@ -43,12 +43,20 @@ public class ImageGenerationController {
     @Operation(summary = "查询生图任务")
     @GetMapping("/{taskId}")
     public CommonResult<ImageTask> get(@PathVariable String taskId) {
-        return CommonResult.success(imageGenerationService.getByTaskId(taskId));
+        ImageTask task = imageGenerationService.getByTaskId(taskId);
+        if (!requireCurrentUserId().equals(task.getUserId())) {
+            throw new org.springframework.security.access.AccessDeniedException("无权访问该任务");
+        }
+        return CommonResult.success(task);
     }
 
     @Operation(summary = "查询生图任务的图片条目")
     @GetMapping("/{id}/items")
     public CommonResult<List<ImageItem>> listItems(@PathVariable Long id) {
+        ImageTask task = imageGenerationService.getById(id);
+        if (!requireCurrentUserId().equals(task.getUserId())) {
+            throw new org.springframework.security.access.AccessDeniedException("无权访问该任务");
+        }
         return CommonResult.success(imageGenerationService.listItems(id));
     }
 
