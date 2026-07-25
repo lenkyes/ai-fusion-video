@@ -1,9 +1,19 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Loader2, Plus, RefreshCw, WandSparkles } from "lucide-react";
+import {
+  CircleAlert,
+  Download,
+  Loader2,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  WandSparkles,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { aiModelApi, type AiModel } from "@/lib/api/ai-model";
+import { dashboardApi } from "@/lib/api/dashboard";
 import {
   imageGenerationApi,
   type ImageGenerationSession,
@@ -13,16 +23,31 @@ import {
 import { resolveMediaUrl } from "@/lib/api/client";
 import { ThumbImage } from "@/components/dashboard/generation-media-result";
 import { ReferenceImageList } from "@/components/dashboard/reference-image-list";
+
+interface SubmissionSnapshot {
+  sessionId: number;
+  prompt: string;
+  modelId: number;
+  referenceImages: string[];
+}
+
+type ImageJob = ImageTask & {
+  items: ImageItem[];
+  clientKey: string;
+  submission?: SubmissionSnapshot;
+};
+
 export default function ImageGenPage() {
   const [sessions, setSessions] = useState<ImageGenerationSession[]>([]),
     [active, setActive] = useState<number>(),
-    [jobs, setJobs] = useState<(ImageTask & { items: ImageItem[] })[]>([]),
+    [jobs, setJobs] = useState<ImageJob[]>([]),
     [prompt, setPrompt] = useState(""),
     [refs, setRefs] = useState<string[]>([]),
     [model, setModel] = useState<AiModel | null>(null),
     [loading, setLoading] = useState(true);
   const loadVersion = useRef(0);
   const activeRef = useRef<number | undefined>(undefined);
+  const temporaryId = useRef(-1);
   const loadJobs = useCallback(async (sessionId: number) => {
     const version = ++loadVersion.current;
     setLoading(true);
@@ -32,6 +57,7 @@ export default function ImageGenPage() {
         page.list.map(async (t) => ({
           ...t,
           items: await imageGenerationApi.items(t.id),
+          clientKey: `task-${t.id}`,
         })),
       );
       if (version === loadVersion.current) setJobs(withItems);
@@ -65,27 +91,123 @@ export default function ImageGenPage() {
     setActive(id);
     setJobs([]);
   };
-  const generate = async () => {
-    if (!prompt.trim() || !model || !active) return;
-    const sessionId = active;
-    const text = prompt.trim();
-    setPrompt("");
-    const id = await imageGenerationApi.submit({
-      sessionId,
-      prompt: text,
-      modelId: model.id,
-      refImageUrls: refs.filter(Boolean).length
-        ? JSON.stringify(refs.filter(Boolean))
-        : undefined,
-      count: 1,
-    });
-    for (let i = 0; i < 90; i++) {
-      const task = await imageGenerationApi.get(id);
-      if (task.status === 2 || task.status === 3) {
-        if (activeRef.current === sessionId) await loadJobs(sessionId);
-        return;
+
+  const updateJob = useCallback(
+    (clientKey: string, update: (job: ImageJob) => ImageJob) => {
+      setJobs((current) =>
+        current.map((job) => (job.clientKey === clientKey ? update(job) : job)),
+      );
+    },
+    [],
+  );
+
+  const pollTask = useCallback(
+    async (taskId: string, sessionId: number, clientKey: string) => {
+      for (let i = 0; i < 90; i++) {
+        try {
+          const task = await imageGenerationApi.get(taskId);
+          const items =
+            task.status === 2 ? await imageGenerationApi.items(task.id) : [];
+          if (activeRef.current === sessionId) {
+            updateJob(clientKey, () => ({
+              ...task,
+              items,
+              clientKey,
+            }));
+          }
+          if (task.status === 2 || task.status === 3) return;
+        } catch {
+          // A temporary polling failure should not turn a persisted task into a failed task.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-      await new Promise((r) => setTimeout(r, 2000));
+    },
+    [updateJob],
+  );
+
+  const submitSnapshot = useCallback(
+    async (snapshot: SubmissionSnapshot, clientKey: string) => {
+      updateJob(clientKey, (job) => ({
+        ...job,
+        status: 0,
+        errorMsg: undefined,
+        items: [],
+      }));
+      try {
+        const taskId = await imageGenerationApi.submit({
+          sessionId: snapshot.sessionId,
+          prompt: snapshot.prompt,
+          modelId: snapshot.modelId,
+          refImageUrls: snapshot.referenceImages.length
+            ? JSON.stringify(snapshot.referenceImages)
+            : undefined,
+          count: 1,
+        });
+        await pollTask(taskId, snapshot.sessionId, clientKey);
+      } catch (error) {
+        if (activeRef.current === snapshot.sessionId) {
+          updateJob(clientKey, (job) => ({
+            ...job,
+            status: 3,
+            errorMsg: error instanceof Error ? error.message : "任务提交失败",
+            submission: snapshot,
+          }));
+        }
+      }
+    },
+    [pollTask, updateJob],
+  );
+
+  const generate = () => {
+    if (!prompt.trim() || !model || !active) return;
+    const snapshot: SubmissionSnapshot = {
+      sessionId: active,
+      prompt: prompt.trim(),
+      modelId: model.id,
+      referenceImages: refs.filter(Boolean),
+    };
+    const id = temporaryId.current--;
+    const clientKey = `pending-${Math.abs(id)}`;
+    const pendingJob: ImageJob = {
+      id,
+      taskId: clientKey,
+      sessionId: snapshot.sessionId,
+      prompt: snapshot.prompt,
+      refImageUrls: snapshot.referenceImages.length
+        ? JSON.stringify(snapshot.referenceImages)
+        : undefined,
+      status: 0,
+      items: [],
+      clientKey,
+      submission: snapshot,
+    };
+    setJobs((current) => [pendingJob, ...current]);
+    setPrompt("");
+    setRefs([]);
+    void submitSnapshot(snapshot, clientKey);
+  };
+
+  const retry = async (job: ImageJob) => {
+    if (job.id < 0 && job.submission) {
+      await submitSnapshot(job.submission, job.clientKey);
+      return;
+    }
+    updateJob(job.clientKey, (current) => ({
+      ...current,
+      status: 0,
+      errorMsg: undefined,
+      items: [],
+    }));
+    try {
+      const result = await dashboardApi.retryTask("image", job.id);
+      await pollTask(result.taskId, job.sessionId ?? activeRef.current!, job.clientKey);
+    } catch (error) {
+      updateJob(job.clientKey, (current) => ({
+        ...current,
+        status: 3,
+        errorMsg: error instanceof Error ? error.message : "重试失败",
+      }));
+      toast.error(error instanceof Error ? error.message : "重试失败");
     }
   };
   const reuse = (job: ImageTask) => {
@@ -140,27 +262,43 @@ export default function ImageGenPage() {
         <div className="flex-1 overflow-y-auto p-5">
           <div className="mx-auto max-w-5xl space-y-5">
             {jobs.map((job) => (
-              <article key={job.id} className="rounded-xl border p-4">
+              <article key={job.clientKey} className="rounded-xl border p-4">
                 <div className="mb-3 flex justify-between">
                   <p className="text-sm leading-6">{job.prompt}</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => reuse(job)}
-                  >
-                    <RefreshCw />
-                    再次创作
-                  </Button>
+                  {job.status === 2 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => reuse(job)}
+                    >
+                      <RefreshCw />
+                      再次创作
+                    </Button>
+                  )}
                 </div>
-                {job.status === 1 && (
-                  <div className="flex h-48 items-center justify-center">
-                    <Loader2 className="animate-spin" />
+                {(job.status === 0 || job.status === 1) && (
+                  <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-lg bg-muted/20 text-muted-foreground">
+                    <Loader2 className="size-6 animate-spin" />
+                    <span className="text-sm">
+                      {job.status === 0 ? "正在排队生成" : "正在生成图片"}
+                    </span>
                   </div>
                 )}
                 {job.status === 3 && (
-                  <p className="text-sm text-destructive">
-                    {job.errorMsg || "生成失败"}
-                  </p>
+                  <div className="flex min-h-36 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 text-center">
+                    <CircleAlert className="size-7 text-destructive" />
+                    <p className="text-sm text-destructive">
+                      {job.errorMsg || "生成失败"}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void retry(job)}
+                    >
+                      <RotateCcw />
+                      重试
+                    </Button>
+                  </div>
                 )}
                 {job.status === 2 && (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
