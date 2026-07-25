@@ -76,6 +76,12 @@ public class ImageGenerationService {
                 .set(ImageTask::getErrorMsg, errorMsg));
     }
 
+    public PageResult<ImageTask> pageByUserAndCategory(Long userId, String category, int pageNo, int pageSize) {
+        return PageResult.of(taskMapper.selectPage(new Page<>(pageNo, pageSize),
+                new LambdaQueryWrapper<ImageTask>().eq(ImageTask::getUserId, userId)
+                        .eq(ImageTask::getCategory, category).orderByDesc(ImageTask::getCreateTime)));
+    }
+
     @CacheEvict(value = "imageTask", allEntries = true)
     @Transactional
     public void delete(Long id) {
