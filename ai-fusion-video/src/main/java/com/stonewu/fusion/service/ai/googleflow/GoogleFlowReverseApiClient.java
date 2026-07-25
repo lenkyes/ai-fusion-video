@@ -90,7 +90,7 @@ public class GoogleFlowReverseApiClient {
             for (String imageUrl : imageUrls) {
                 content.add(Map.of(
                         "type", "image_url",
-                        "image_url", Map.of("url", toDataUrl(imageUrl))
+                        "image_url", Map.of("url", imageUrl)
                 ));
             }
             userMessage = Map.of(
