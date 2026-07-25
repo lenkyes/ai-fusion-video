@@ -300,6 +300,13 @@ public class ImageGenerationConsumer {
         if (strategy == null) {
             strategy = map.values().iterator().next();
         }
+        // AI 仪表板生图统一使用 Chat Completions 多模态协议，避免误走 /images/edits。
+        if ("dashboard_image_gen".equals(task.getCategory())) {
+            ImageGenerationStrategy dashboardStrategy = resolveStrategyByName(map, "GoogleFlowReverseApi");
+            if (dashboardStrategy != null) {
+                strategy = dashboardStrategy;
+            }
+        }
         if (apiConfig == null) {
             List<ApiConfig> configs = apiConfigService.getEnabledList();
             for (ApiConfig cfg : configs) {

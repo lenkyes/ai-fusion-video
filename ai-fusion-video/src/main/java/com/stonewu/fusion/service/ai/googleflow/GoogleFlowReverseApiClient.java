@@ -9,6 +9,7 @@ import com.stonewu.fusion.entity.storage.StorageConfig;
 import com.stonewu.fusion.service.ai.proxy.AiProxySupport;
 import com.stonewu.fusion.service.storage.StorageConfigService;
 import com.stonewu.fusion.service.system.PresetArtStyleResourceResolver;
+import com.stonewu.fusion.service.system.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
@@ -45,6 +46,7 @@ public class GoogleFlowReverseApiClient {
 
     private final StorageConfigService storageConfigService;
     private final PresetArtStyleResourceResolver presetArtStyleResourceResolver;
+    private final SystemConfigService systemConfigService;
 
     private final OkHttpClient streamHttpClient = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -90,7 +92,7 @@ public class GoogleFlowReverseApiClient {
             for (String imageUrl : imageUrls) {
                 content.add(Map.of(
                         "type", "image_url",
-                        "image_url", Map.of("url", imageUrl)
+                        "image_url", Map.of("url", systemConfigService.resolvePublicUrl(imageUrl))
                 ));
             }
             userMessage = Map.of(
