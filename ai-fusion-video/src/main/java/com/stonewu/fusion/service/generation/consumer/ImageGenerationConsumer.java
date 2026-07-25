@@ -316,7 +316,11 @@ public class ImageGenerationConsumer {
         }
 
         try {
-            generationModelCapabilityService.validateImageTask(model, task);
+            // AI 仪表盘的图片模型遵循 OpenAI-compatible 多模态协议，能力由 API 配置实际支持情况决定。
+            // 该入口允许参考图直接透传，项目内其它生成入口仍保持严格能力校验。
+            if (!"dashboard_image_gen".equals(task.getCategory())) {
+                generationModelCapabilityService.validateImageTask(model, task);
+            }
             String platformTaskId = strategy.submit(task, apiConfig);
             log.info("[ImageConsumer] 任务已提交到平台: taskId={}, platformTaskId={}", taskId, platformTaskId);
 
