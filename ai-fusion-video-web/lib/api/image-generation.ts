@@ -1,5 +1,43 @@
-import {http} from "./client";
-export interface ImageTask{id:number;taskId:string;sessionId?:number;prompt:string;refImageUrls?:string;status:number;errorMsg?:string}
-export interface ImageItem{imageUrl?:string;thumbnailUrl?:string;status:number}
-export interface ImageGenerationSession{id:number;userId:number;title:string;createTime:string;updateTime:string}
-export const imageGenerationApi={page:()=>http.get<never,{list:ImageTask[];total:number}>("/api/generation/image/page?pageNo=1&pageSize=100&category=dashboard_image_gen"),submit:(data:Record<string,unknown>)=>http.post<never,string>("/api/generation/image/submit",{category:"dashboard_image_gen",...data}),get:(id:string)=>http.get<never,ImageTask>(`/api/generation/image/${encodeURIComponent(id)}`),items:(id:number)=>http.get<never,ImageItem[]>(`/api/generation/image/${id}/items`),sessions:()=>http.get<never,ImageGenerationSession[]>("/api/generation/image/sessions"),createSession:(title:string)=>http.post<never,number>("/api/generation/image/sessions",{title})};
+import { http } from "./client";
+export interface ImageTask {
+  id: number;
+  taskId: string;
+  sessionId?: number;
+  prompt: string;
+  refImageUrls?: string;
+  status: number;
+  errorMsg?: string;
+}
+export interface ImageItem {
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  status: number;
+}
+export interface ImageGenerationSession {
+  id: number;
+  userId: number;
+  title: string;
+  createTime: string;
+  updateTime: string;
+}
+export const imageGenerationApi = {
+  page: (sessionId: number) =>
+    http.get<never, { list: ImageTask[]; total: number }>(
+      `/api/generation/image/page?pageNo=1&pageSize=100&category=dashboard_image_gen&sessionId=${sessionId}`,
+    ),
+  submit: (data: Record<string, unknown>) =>
+    http.post<never, string>("/api/generation/image/submit", {
+      category: "dashboard_image_gen",
+      ...data,
+    }),
+  get: (id: string) =>
+    http.get<never, ImageTask>(
+      `/api/generation/image/${encodeURIComponent(id)}`,
+    ),
+  items: (id: number) =>
+    http.get<never, ImageItem[]>(`/api/generation/image/${id}/items`),
+  sessions: () =>
+    http.get<never, ImageGenerationSession[]>("/api/generation/image/sessions"),
+  createSession: (title: string) =>
+    http.post<never, number>("/api/generation/image/sessions", { title }),
+};

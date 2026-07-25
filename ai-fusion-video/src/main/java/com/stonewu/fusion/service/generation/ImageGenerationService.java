@@ -79,7 +79,18 @@ public class ImageGenerationService {
     public PageResult<ImageTask> pageByUserAndCategory(Long userId, String category, int pageNo, int pageSize) {
         return PageResult.of(taskMapper.selectPage(new Page<>(pageNo, pageSize),
                 new LambdaQueryWrapper<ImageTask>().eq(ImageTask::getUserId, userId)
-                        .eq(ImageTask::getCategory, category).orderByDesc(ImageTask::getCreateTime)));
+                        .eq(ImageTask::getCategory, category)
+                        .isNotNull(ImageTask::getSessionId)
+                        .orderByDesc(ImageTask::getCreateTime)));
+    }
+
+    public PageResult<ImageTask> pageByUserCategoryAndSession(Long userId, String category, Long sessionId,
+                                                               int pageNo, int pageSize) {
+        return PageResult.of(taskMapper.selectPage(new Page<>(pageNo, pageSize),
+                new LambdaQueryWrapper<ImageTask>().eq(ImageTask::getUserId, userId)
+                        .eq(ImageTask::getCategory, category)
+                        .eq(ImageTask::getSessionId, sessionId)
+                        .orderByDesc(ImageTask::getCreateTime)));
     }
 
     @CacheEvict(value = "imageTask", allEntries = true)

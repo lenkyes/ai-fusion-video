@@ -86,10 +86,15 @@ public class ImageGenerationController {
 
     @Operation(summary = "分页查询当前用户的生图任务")
     @GetMapping("/page")
-    public CommonResult<PageResult<ImageTask>> page(PageParam pageParam, @RequestParam(required = false) String category) {
+    public CommonResult<PageResult<ImageTask>> page(PageParam pageParam,
+                                                    @RequestParam(required = false) String category,
+                                                    @RequestParam(required = false) Long sessionId) {
         Long userId = requireCurrentUserId();
         PageResult<ImageTask> result = "dashboard_image_gen".equals(category)
-                ? imageGenerationService.pageByUserAndCategory(userId, category, pageParam.getPageNo(), pageParam.getPageSize())
+                ? sessionId == null
+                    ? imageGenerationService.pageByUserAndCategory(userId, category, pageParam.getPageNo(), pageParam.getPageSize())
+                    : imageGenerationService.pageByUserCategoryAndSession(userId, category, sessionId,
+                            pageParam.getPageNo(), pageParam.getPageSize())
                 : imageGenerationService.pageByUser(userId, pageParam.getPageNo(), pageParam.getPageSize());
         return CommonResult.success(result);
     }
