@@ -33,6 +33,9 @@ public class VideoTask extends BaseEntity {
     /** 发起用户ID */
     private Long userId;
 
+    /** 关联的视频生成会话ID */
+    private Long sessionId;
+
     /** 关联项目ID */
     private Long projectId;
 

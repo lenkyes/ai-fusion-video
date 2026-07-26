@@ -37,6 +37,7 @@ const dashboardItems: SidebarItem[] = [
   { key: "overview", label: "总览", icon: LayoutDashboard, href: "/dashboard", iconColor: "text-blue-400" },
   { key: "assistant", label: "AI 助手", icon: Bot, href: "/dashboard/assistant", iconColor: "text-purple-400" },
   { key: "image-gen", label: "AI生图", icon: WandSparkles, href: "/dashboard/image-gen", iconColor: "text-pink-400" },
+  { key: "video-gen", label: "AI视频", icon: Clapperboard, href: "/dashboard/video-gen", iconColor: "text-cyan-400" },
   { key: "analytics", label: "数据分析", icon: BarChart3, href: "/dashboard/analytics", iconColor: "text-purple-400" },
   { key: "tasks", label: "任务中心", icon: ListChecks, href: "/dashboard/tasks", iconColor: "text-cyan-400" },
 ];

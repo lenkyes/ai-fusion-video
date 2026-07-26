@@ -53,6 +53,23 @@ public class VideoGenerationService {
                         .orderByDesc(VideoTask::getCreateTime)));
     }
 
+    public PageResult<VideoTask> pageByUserAndCategory(Long userId, String category, int pageNo, int pageSize) {
+        return PageResult.of(taskMapper.selectPage(new Page<>(pageNo, pageSize),
+                new LambdaQueryWrapper<VideoTask>().eq(VideoTask::getUserId, userId)
+                        .eq(VideoTask::getCategory, category)
+                        .isNotNull(VideoTask::getSessionId)
+                        .orderByDesc(VideoTask::getCreateTime)));
+    }
+
+    public PageResult<VideoTask> pageByUserCategoryAndSession(Long userId, String category, Long sessionId,
+                                                               int pageNo, int pageSize) {
+        return PageResult.of(taskMapper.selectPage(new Page<>(pageNo, pageSize),
+                new LambdaQueryWrapper<VideoTask>().eq(VideoTask::getUserId, userId)
+                        .eq(VideoTask::getCategory, category)
+                        .eq(VideoTask::getSessionId, sessionId)
+                        .orderByDesc(VideoTask::getCreateTime)));
+    }
+
     @CacheEvict(value = "videoTask", allEntries = true)
     @Transactional
     public VideoTask create(VideoTask task) {

@@ -11,6 +11,8 @@ import lombok.Data;
 @Data
 public class VideoTaskSubmitReqVO {
 
+    private Long sessionId;
+
     private Long projectId;
 
     @NotBlank(message = "提示词不能为空")
