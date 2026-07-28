@@ -26,12 +26,15 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Check,
+  CircleAlert,
   Copy,
   Download,
+  FilePlus2,
   FileUp,
   Focus,
   ImageIcon,
   Link2,
+  Loader2,
   MousePointer2,
   Network,
   StickyNote,
@@ -39,6 +42,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  Sparkles,
   Trash2,
   Type,
   Undo2,
@@ -57,6 +61,12 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { aiModelApi, type AiModel } from "@/lib/api/ai-model";
+import { pipelineStream } from "@/lib/api/ai-pipeline";
+import { imageGenerationApi } from "@/lib/api/image-generation";
+import { videoGenerationApi, type VideoModelCapability } from "@/lib/api/video-generation";
+import { resolveMediaUrl } from "@/lib/api/client";
+import { uploadFile, uploadVideo } from "@/lib/api/storage";
 
 type CanvasNodeKind = "text" | "note" | "image" | "video";
 
@@ -65,12 +75,17 @@ type CanvasNodeData = {
   title: string;
   content?: string;
   url?: string;
+  status?: "idle" | "queued" | "running" | "done" | "error";
+  error?: string;
+  modelName?: string;
+  generated?: boolean;
+  uploading?: boolean;
 };
 
 type CanvasNode = Node<CanvasNodeData, "canvasNode">;
 
 type CanvasDocument = {
-  version: 1;
+  version: 1 | 2;
   nodes: CanvasNode[];
   edges: Edge[];
   viewport: { x: number; y: number; zoom: number };
@@ -78,7 +93,7 @@ type CanvasDocument = {
 
 type HistoryEntry = Pick<CanvasDocument, "nodes" | "edges">;
 
-const STORAGE_KEY = "ai-fusion-infinite-canvas-v1";
+const STORAGE_KEY = "ai-fusion-infinite-canvas-v2";
 const nodeColors: Record<CanvasNodeKind, string> = {
   text: "#10b981",
   note: "#f59e0b",
@@ -98,34 +113,19 @@ const initialNodes: CanvasNode[] = [
       content: "双击文字开始编辑，把提示词、参考图和视频用连线组织起来。",
     },
   },
-  {
-    id: "welcome-note",
-    type: "canvasNode",
-    dragHandle: ".drag-handle",
-    position: { x: 410, y: 190 },
-    data: {
-      kind: "note",
-      title: "镜头备注",
-      content: "从左侧工具栏添加内容，滚轮缩放，拖动画布移动视角。",
-    },
-  },
 ];
 
-const initialEdges: Edge[] = [
-  {
-    id: "welcome-edge",
-    source: "welcome-prompt",
-    target: "welcome-note",
-    type: "smoothstep",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  },
-];
+const initialEdges: Edge[] = [];
 
 function cloneHistory(nodes: CanvasNode[], edges: Edge[]): HistoryEntry {
   return {
     nodes: structuredClone(nodes),
     edges: structuredClone(edges),
   };
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
@@ -139,6 +139,12 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
   const updateData = (patch: Partial<CanvasNodeData>) => {
     window.dispatchEvent(
       new CustomEvent("infinite-canvas:update-node", { detail: { id, patch } }),
+    );
+  };
+
+  const runGeneration = () => {
+    window.dispatchEvent(
+      new CustomEvent("infinite-canvas:run-node", { detail: { id } }),
     );
   };
 
@@ -164,13 +170,27 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
       {data.kind === "image" && data.url ? (
         <div className="relative aspect-video bg-muted/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={data.url} alt={data.title} className="h-full w-full object-contain" />
+          <img src={resolveMediaUrl(data.url) ?? data.url} alt={data.title} className="h-full w-full object-contain" />
+        </div>
+      ) : null}
+
+      {data.kind === "image" && !data.url ? (
+        <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/25 text-muted-foreground">
+          <ImageIcon className="size-7" />
+          <span className="text-xs">连接文本后点击生成</span>
         </div>
       ) : null}
 
       {data.kind === "video" && data.url ? (
         <div className="nodrag nowheel aspect-video bg-black">
-          <video src={data.url} controls className="h-full w-full object-contain" />
+          <video src={resolveMediaUrl(data.url) ?? data.url} controls className="h-full w-full object-contain" />
+        </div>
+      ) : null}
+
+      {data.kind === "video" && !data.url ? (
+        <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-black/5 text-muted-foreground dark:bg-white/5">
+          <Video className="size-7" />
+          <span className="text-xs">连接文本或图片后点击生成</span>
         </div>
       ) : null}
 
@@ -185,6 +205,24 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
           )}
         />
       )}
+
+      {data.kind !== "note" ? (
+        <footer className="nodrag flex items-center justify-between gap-2 border-t bg-muted/15 px-3 py-2">
+          <span className="min-w-0 truncate text-[10px] text-muted-foreground">
+            {data.status === "error" ? (
+              <span className="flex items-center gap-1 text-destructive"><CircleAlert className="size-3" />{data.error || "生成失败"}</span>
+            ) : data.modelName ? `默认模型 · ${data.modelName}` : "正在读取默认模型"}
+          </span>
+          <Button
+            size="xs"
+            onClick={runGeneration}
+            disabled={data.status === "queued" || data.status === "running" || !data.modelName}
+          >
+            {data.status === "queued" || data.status === "running" ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {data.uploading ? "上传中" : data.status === "queued" ? "排队中" : data.status === "running" ? "生成中" : data.generated ? "重新生成" : "生成"}
+          </Button>
+        </footer>
+      ) : null}
 
       <Handle type="source" position={Position.Right} className="!size-3 !border-2 !border-background !bg-emerald-500" />
     </article>
@@ -223,11 +261,17 @@ function CanvasWorkspace() {
   const [saved, setSaved] = useState(true);
   const [past, setPast] = useState<HistoryEntry[]>([]);
   const [future, setFuture] = useState<HistoryEntry[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const [models, setModels] = useState<Record<1 | 2 | 3, AiModel | null>>({ 1: null, 2: null, 3: null });
+  const [videoCapability, setVideoCapability] = useState<VideoModelCapability | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HistoryEntry>(cloneHistory(initialNodes, initialEdges));
   const draggingRef = useRef(false);
   const didHydrateRef = useRef(false);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const activeStreamsRef = useRef(new Map<string, AbortController>());
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow<CanvasNode, Edge>();
 
   const pushHistory = useCallback(() => {
@@ -240,11 +284,71 @@ function CanvasWorkspace() {
     setSaved(false);
   }, []);
 
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  const patchNode = useCallback((id: string, patch: Partial<CanvasNodeData>) => {
+    setNodes((current) => {
+      const next = current.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, ...patch } } : node,
+      );
+      nodesRef.current = next;
+      commitState(next, edgesRef.current);
+      return next;
+    });
+  }, [commitState]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const activeStreams = activeStreamsRef.current;
+    Promise.all([1, 2, 3].map((type) => aiModelApi.listByType(type)))
+      .then(async ([textModels, imageModels, videoModels]) => {
+        if (cancelled) return;
+        const nextModels = {
+          1: textModels.find((model) => model.defaultModel) ?? textModels[0] ?? null,
+          2: imageModels.find((model) => model.defaultModel) ?? imageModels[0] ?? null,
+          3: videoModels.find((model) => model.defaultModel) ?? videoModels[0] ?? null,
+        } as Record<1 | 2 | 3, AiModel | null>;
+        setModels(nextModels);
+        if (nextModels[3]) {
+          setVideoCapability(await videoGenerationApi.capability(nextModels[3].id));
+        }
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "默认模型加载失败"));
+    return () => {
+      cancelled = true;
+      activeStreams.forEach((controller) => controller.abort());
+    };
+  }, []);
+
+  useEffect(() => {
+    const names: Record<CanvasNodeKind, string | undefined> = {
+      text: models[1]?.name,
+      note: undefined,
+      image: models[2]?.name,
+      video: models[3]?.name,
+    };
+    setNodes((current) => {
+      const next = current.map((node) => ({
+        ...node,
+        data: { ...node.data, modelName: names[node.data.kind] },
+      }));
+      nodesRef.current = next;
+      return next;
+    });
+  }, [models]);
+
   const addNode = useCallback(
     (kind: CanvasNodeKind, url?: string, position?: { x: number; y: number }, title?: string) => {
       pushHistory();
+      const id = crypto.randomUUID();
       const nextNode: CanvasNode = {
-        id: crypto.randomUUID(),
+        id,
         type: "canvasNode",
         dragHandle: ".drag-handle",
         position: position ?? screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
@@ -253,6 +357,8 @@ function CanvasWorkspace() {
           title: title ?? ({ text: "文本", note: "便签", image: "图片", video: "视频" }[kind]),
           content: kind === "text" || kind === "note" ? "" : undefined,
           url,
+          status: "idle",
+          modelName: kind === "text" ? models[1]?.name : kind === "image" ? models[2]?.name : kind === "video" ? models[3]?.name : undefined,
         },
       };
       setNodes((current) => {
@@ -260,8 +366,9 @@ function CanvasWorkspace() {
         commitState(next, edges);
         return next;
       });
+      return id;
     },
-    [commitState, edges, pushHistory, screenToFlowPosition],
+    [commitState, edges, models, pushHistory, screenToFlowPosition],
   );
 
   useEffect(() => {
@@ -271,7 +378,7 @@ function CanvasWorkspace() {
       const savedDocument = localStorage.getItem(STORAGE_KEY);
       if (savedDocument) {
         const document = JSON.parse(savedDocument) as CanvasDocument;
-        if (document.version === 1 && Array.isArray(document.nodes) && Array.isArray(document.edges)) {
+        if ((document.version === 1 || document.version === 2) && Array.isArray(document.nodes) && Array.isArray(document.edges)) {
           setNodes(document.nodes);
           setEdges(document.edges);
           historyRef.current = cloneHistory(document.nodes, document.edges);
@@ -289,7 +396,7 @@ function CanvasWorkspace() {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       const document: CanvasDocument = {
-        version: 1,
+        version: 2,
         nodes,
         edges,
         viewport: instance?.getViewport() ?? { x: 0, y: 0, zoom: 1 },
@@ -303,17 +410,185 @@ function CanvasWorkspace() {
   useEffect(() => {
     const updateNode = (event: Event) => {
       const { id, patch } = (event as CustomEvent<{ id: string; patch: Partial<CanvasNodeData> }>).detail;
-      setNodes((current) => {
-        const next = current.map((node) =>
-          node.id === id ? { ...node, data: { ...node.data, ...patch } } : node,
-        );
-        commitState(next, edges);
-        return next;
-      });
+      patchNode(id, patch);
     };
     window.addEventListener("infinite-canvas:update-node", updateNode);
     return () => window.removeEventListener("infinite-canvas:update-node", updateNode);
-  }, [commitState, edges]);
+  }, [patchNode]);
+
+  const collectInputs = useCallback((targetId: string) => {
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    const byId = new Map(currentNodes.map((node) => [node.id, node]));
+    const visited = new Set<string>();
+    const upstream: CanvasNode[] = [];
+
+    const visit = (id: string) => {
+      currentEdges.filter((edge) => edge.target === id).forEach((edge) => {
+        if (visited.has(edge.source)) return;
+        visited.add(edge.source);
+        visit(edge.source);
+        const source = byId.get(edge.source);
+        if (source) upstream.push(source);
+      });
+    };
+    visit(targetId);
+
+    return {
+      texts: upstream
+        .filter((node) => node.data.kind === "text" || node.data.kind === "note")
+        .map((node) => node.data.content?.trim())
+        .filter((value): value is string => Boolean(value)),
+      images: upstream
+        .filter((node) => node.data.kind === "image" && node.data.url)
+        .map((node) => node.data.url!)
+        .filter((url) => !url.startsWith("blob:")),
+    };
+  }, []);
+
+  const runTextNode = useCallback((node: CanvasNode, prompt: string) => {
+    const model = models[1];
+    if (!model) throw new Error("未配置默认文本模型");
+    patchNode(node.id, { status: "running", error: undefined, content: "", generated: false });
+    let output = "";
+    let streamFailed = false;
+    const controller = pipelineStream(
+      {
+        message: prompt,
+        modelId: model.id,
+        agentType: "ai_media",
+        category: "infinite_canvas",
+        title: prompt.slice(0, 40),
+        context: { entry: "infinite_canvas", projectScope: "global_workspace" },
+      },
+      {
+        onEvent: (event) => {
+          if (event.outputType === "CONTENT" && event.content) {
+            output += event.content;
+            patchNode(node.id, { content: output, status: "running" });
+          } else if (event.outputType === "ERROR") {
+            streamFailed = true;
+            patchNode(node.id, { status: "error", error: event.error || "文本生成失败" });
+          } else if (event.outputType === "DONE") {
+            patchNode(node.id, { status: "done", generated: true });
+          }
+        },
+        onError: (error) => {
+          streamFailed = true;
+          activeStreamsRef.current.delete(node.id);
+          patchNode(node.id, { status: "error", error: error.message });
+        },
+        onComplete: () => {
+          activeStreamsRef.current.delete(node.id);
+          if (!streamFailed) patchNode(node.id, { status: "done", generated: true });
+        },
+      },
+    );
+    activeStreamsRef.current.set(node.id, controller);
+  }, [models, patchNode]);
+
+  const runImageNode = useCallback(async (node: CanvasNode, prompt: string, references: string[]) => {
+    const model = models[2];
+    if (!model) throw new Error("未配置默认图片模型");
+    patchNode(node.id, { status: "queued", error: undefined, generated: false });
+    const taskId = await imageGenerationApi.submit({
+      prompt,
+      modelId: model.id,
+      refImageUrls: references.length ? JSON.stringify(references) : undefined,
+      count: 1,
+      category: "infinite_canvas",
+    });
+    for (let index = 0; index < 180; index++) {
+      const task = await imageGenerationApi.get(taskId);
+      patchNode(node.id, { status: task.status === 0 ? "queued" : "running" });
+      if (task.status === 3) throw new Error(task.errorMsg || "图片生成失败");
+      if (task.status === 2) {
+        const items = await imageGenerationApi.items(task.id);
+        const result = items.find((item) => item.status === 1 && item.imageUrl);
+        if (!result?.imageUrl) throw new Error("图片任务完成但没有返回结果");
+        patchNode(node.id, { url: result.imageUrl, status: "done", generated: true });
+        return;
+      }
+      await wait(2000);
+    }
+    throw new Error("图片生成超时");
+  }, [models, patchNode]);
+
+  const runVideoNode = useCallback(async (node: CanvasNode, prompt: string, references: string[]) => {
+    const model = models[3];
+    if (!model) throw new Error("未配置默认视频模型");
+    const capability = videoCapability ?? await videoGenerationApi.capability(model.id);
+    const maxImages = capability.maxImageInputs ?? references.length;
+    const usableReferences = maxImages > 0 ? references.slice(0, maxImages) : [];
+    const request: Record<string, unknown> = {
+      prompt,
+      modelId: model.id,
+      generateMode: usableReferences.length ? "image2video" : "text2video",
+      duration: capability.defaultDuration ?? 5,
+      resolution: capability.supportedResolutions?.[0],
+      ratio: capability.supportedAspectRatios?.[0],
+      count: 1,
+      category: "infinite_canvas",
+    };
+    if (usableReferences.length) {
+      if (capability.supportsReferenceImages) {
+        request.referenceImageUrls = JSON.stringify(usableReferences.slice(0, capability.maxReferenceImages ?? usableReferences.length));
+      } else if (capability.supportsFirstFrame) {
+        request.firstFrameImageUrl = usableReferences[0];
+        if (capability.supportsLastFrame && usableReferences[1]) request.lastFrameImageUrl = usableReferences[1];
+      }
+    }
+    patchNode(node.id, { status: "queued", error: undefined, generated: false });
+    const taskId = await videoGenerationApi.submit(request);
+    for (let index = 0; index < 300; index++) {
+      const task = await videoGenerationApi.get(taskId);
+      patchNode(node.id, { status: task.status === 0 ? "queued" : "running" });
+      if (task.status === 3) throw new Error(task.errorMsg || "视频生成失败");
+      if (task.status === 2) {
+        const items = await videoGenerationApi.items(task.id);
+        const result = items.find((item) => item.status === 1 && item.videoUrl);
+        if (!result?.videoUrl) throw new Error("视频任务完成但没有返回结果");
+        patchNode(node.id, { url: result.videoUrl, status: "done", generated: true });
+        return;
+      }
+      await wait(3000);
+    }
+    throw new Error("视频生成超时");
+  }, [models, patchNode, videoCapability]);
+
+  useEffect(() => {
+    const runNode = (event: Event) => {
+      const { id } = (event as CustomEvent<{ id: string }>).detail;
+      const node = nodesRef.current.find((item) => item.id === id);
+      if (!node || node.data.kind === "note") return;
+      const input = collectInputs(id);
+      const ownText = node.data.kind === "text" ? node.data.content?.trim() : undefined;
+      const promptParts = [...input.texts, ownText].filter((value): value is string => Boolean(value));
+      const prompt = Array.from(new Set(promptParts)).join("\n\n");
+      if (!prompt) {
+        patchNode(id, { status: "error", error: "请连接一个文本节点作为提示词" });
+        return;
+      }
+      if (node.data.status === "running" || node.data.status === "queued") return;
+      pushHistory();
+      try {
+        if (node.data.kind === "text") {
+          runTextNode(node, prompt);
+        } else {
+          const task = node.data.kind === "image"
+            ? runImageNode(node, prompt, input.images)
+            : runVideoNode(node, prompt, input.images);
+          void task.catch((error) => {
+            patchNode(id, { status: "error", error: error instanceof Error ? error.message : "生成失败" });
+          });
+        }
+      } catch (error) {
+        patchNode(id, { status: "error", error: error instanceof Error ? error.message : "生成失败" });
+      }
+    };
+    window.addEventListener("infinite-canvas:run-node", runNode);
+    return () => window.removeEventListener("infinite-canvas:run-node", runNode);
+  }, [collectInputs, patchNode, pushHistory, runImageNode, runTextNode, runVideoNode]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
@@ -433,18 +708,30 @@ function CanvasWorkspace() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [deleteSelected, duplicateSelected, redo, undo]);
 
-  const handleMediaFiles = (files: FileList | File[]) => {
+  const handleMediaFiles = (files: FileList | File[], position?: { x: number; y: number }) => {
     Array.from(files).forEach((file, index) => {
       if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) return;
       const kind = file.type.startsWith("image/") ? "image" : "video";
-      addNode(kind, URL.createObjectURL(file), undefined, file.name.replace(/\.[^.]+$/, ""));
-      if (index === 0) toast.success("媒体已添加到画布");
+      const previewUrl = URL.createObjectURL(file);
+      const nodePosition = position ? { x: position.x + index * 28, y: position.y + index * 28 } : undefined;
+      const id = addNode(kind, previewUrl, nodePosition, file.name.replace(/\.[^.]+$/, ""));
+      patchNode(id, { status: "running", uploading: true, error: undefined });
+      const upload = kind === "image" ? uploadFile(file, "infinite-canvas") : uploadVideo(file);
+      void upload
+        .then((url) => {
+          URL.revokeObjectURL(previewUrl);
+          patchNode(id, { url, status: "done", uploading: false });
+          if (index === 0) toast.success("媒体已上传并添加到画布");
+        })
+        .catch((error) => {
+          patchNode(id, { status: "error", uploading: false, error: error instanceof Error ? error.message : "上传失败" });
+        });
     });
   };
 
   const exportDocument = () => {
     const document: CanvasDocument = {
-      version: 1,
+      version: 2,
       nodes,
       edges,
       viewport: instance?.getViewport() ?? { x: 0, y: 0, zoom: 1 },
@@ -463,7 +750,7 @@ function CanvasWorkspace() {
     if (!file) return;
     try {
       const document = JSON.parse(await file.text()) as CanvasDocument;
-      if (document.version !== 1 || !Array.isArray(document.nodes) || !Array.isArray(document.edges)) {
+      if ((document.version !== 1 && document.version !== 2) || !Array.isArray(document.nodes) || !Array.isArray(document.edges)) {
         throw new Error();
       }
       pushHistory();
@@ -514,14 +801,7 @@ function CanvasWorkspace() {
         </div>
       </header>
 
-      <div
-        className="relative min-h-0 flex-1"
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          handleMediaFiles(event.dataTransfer.files);
-        }}
-      >
+      <div className="relative min-h-0 flex-1">
         <ReactFlow<CanvasNode, Edge>
           nodes={nodes}
           edges={edges}
@@ -545,6 +825,20 @@ function CanvasWorkspace() {
           colorMode="system"
           proOptions={{ hideAttribution: true }}
           onMoveEnd={() => setSaved(false)}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) setDragActive(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+            if (!event.dataTransfer.files.length) return;
+            handleMediaFiles(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+          }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="var(--border)" />
           <MiniMap
@@ -561,9 +855,20 @@ function CanvasWorkspace() {
           <div className="mx-2 h-px bg-border" />
           <ToolButton icon={<Type />} label="文本" onClick={() => addNode("text")} />
           <ToolButton icon={<StickyNote />} label="便签" onClick={() => addNode("note")} />
-          <ToolButton icon={<ImageIcon />} label="图片" onClick={() => fileInputRef.current?.click()} />
-          <ToolButton icon={<Video />} label="视频" onClick={() => fileInputRef.current?.click()} />
+          <ToolButton icon={<ImageIcon />} label="AI 图片" onClick={() => addNode("image")} />
+          <ToolButton icon={<Video />} label="AI 视频" onClick={() => addNode("video")} />
+          <div className="mx-2 h-px bg-border" />
+          <ToolButton icon={<FilePlus2 />} label="上传素材" onClick={() => fileInputRef.current?.click()} />
         </aside>
+
+        {dragActive ? (
+          <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-emerald-500 bg-emerald-500/8">
+            <div className="rounded-md border bg-background px-4 py-3 text-center shadow-lg">
+              <FilePlus2 className="mx-auto mb-1 size-5 text-emerald-500" />
+              <p className="text-sm font-medium">松开以添加图片或视频</p>
+            </div>
+          </div>
+        ) : null}
 
         <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-lg backdrop-blur">
           <Button size="icon-sm" variant="ghost" onClick={() => void zoomOut()} title="缩小"><ZoomOut /></Button>

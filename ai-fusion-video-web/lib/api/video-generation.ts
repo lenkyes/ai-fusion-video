@@ -16,6 +16,12 @@ export interface VideoModelCapability {
   configured: boolean;
   modelId?: number;
   modelName?: string;
+  supportsFirstFrame?: boolean;
+  supportsLastFrame?: boolean;
+  supportsReferenceImages?: boolean;
+  minImageInputs?: number;
+  maxImageInputs?: number;
+  maxReferenceImages?: number;
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
   minDuration?: number;
