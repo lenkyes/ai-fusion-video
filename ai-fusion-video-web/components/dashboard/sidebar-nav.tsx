@@ -16,6 +16,7 @@ import {
   HardDrive,
   ListChecks,
   Clapperboard,
+  Network,
   WandSparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,6 +39,7 @@ const dashboardItems: SidebarItem[] = [
   { key: "assistant", label: "AI 助手", icon: Bot, href: "/dashboard/assistant", iconColor: "text-purple-400" },
   { key: "image-gen", label: "AI生图", icon: WandSparkles, href: "/dashboard/image-gen", iconColor: "text-pink-400" },
   { key: "video-gen", label: "AI视频", icon: Clapperboard, href: "/dashboard/video-gen", iconColor: "text-cyan-400" },
+  { key: "infinite-canvas", label: "无限画布", icon: Network, href: "/dashboard/infinite-canvas", iconColor: "text-emerald-400" },
   { key: "analytics", label: "数据分析", icon: BarChart3, href: "/dashboard/analytics", iconColor: "text-purple-400" },
   { key: "tasks", label: "任务中心", icon: ListChecks, href: "/dashboard/tasks", iconColor: "text-cyan-400" },
 ];
