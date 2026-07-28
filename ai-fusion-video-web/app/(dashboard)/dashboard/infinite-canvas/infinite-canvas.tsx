@@ -7,6 +7,7 @@ import {
   Handle,
   MarkerType,
   MiniMap,
+  NodeResizer,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -18,6 +19,7 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -47,6 +49,7 @@ import {
   Type,
   Undo2,
   Video,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -58,6 +61,7 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -93,6 +97,18 @@ type CanvasDocument = {
 
 type HistoryEntry = Pick<CanvasDocument, "nodes" | "edges">;
 
+type QuickCreateState = {
+  sourceId: string;
+  flowPosition: { x: number; y: number };
+  screenPosition: { x: number; y: number };
+};
+
+type MediaPreview = {
+  kind: "image" | "video";
+  title: string;
+  url: string;
+};
+
 const STORAGE_KEY = "ai-fusion-infinite-canvas-v2";
 const nodeColors: Record<CanvasNodeKind, string> = {
   text: "#10b981",
@@ -106,6 +122,7 @@ const initialNodes: CanvasNode[] = [
     id: "welcome-prompt",
     type: "canvasNode",
     dragHandle: ".drag-handle",
+    style: { width: 300, height: 250 },
     position: { x: 40, y: 80 },
     data: {
       kind: "text",
@@ -148,13 +165,31 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
     );
   };
 
+  const openPreview = () => {
+    if (!data.url || (data.kind !== "image" && data.kind !== "video")) return;
+    window.dispatchEvent(
+      new CustomEvent("infinite-canvas:preview-media", {
+        detail: { kind: data.kind, title: data.title, url: data.url },
+      }),
+    );
+  };
+
   return (
     <article
       className={cn(
-        "group w-[300px] overflow-hidden rounded-lg border bg-card shadow-sm transition-shadow",
+        "group flex size-full min-h-[190px] min-w-[240px] flex-col overflow-hidden rounded-lg border bg-card shadow-sm transition-shadow",
         selected ? "border-emerald-500 shadow-lg shadow-emerald-500/10" : "border-border/70",
       )}
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={240}
+        minHeight={data.kind === "text" || data.kind === "note" ? 190 : 230}
+        maxWidth={1000}
+        maxHeight={900}
+        lineClassName="!border-emerald-500"
+        handleClassName="!size-3 !rounded-sm !border-2 !border-background !bg-emerald-500"
+      />
       <Handle type="target" position={Position.Left} className="!size-3 !border-2 !border-background !bg-emerald-500" />
       <header className="drag-handle flex h-10 cursor-grab items-center gap-2 border-b bg-muted/30 px-3 active:cursor-grabbing">
         <span className="text-emerald-500 [&_svg]:size-4">{icon}</span>
@@ -168,27 +203,27 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
       </header>
 
       {data.kind === "image" && data.url ? (
-        <div className="relative aspect-video bg-muted/40">
+        <div className="nodrag relative min-h-0 flex-1 cursor-zoom-in bg-muted/40" onDoubleClick={openPreview} title="双击全屏查看">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={resolveMediaUrl(data.url) ?? data.url} alt={data.title} className="h-full w-full object-contain" />
         </div>
       ) : null}
 
       {data.kind === "image" && !data.url ? (
-        <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted/25 text-muted-foreground">
+        <div className="flex min-h-28 flex-1 flex-col items-center justify-center gap-2 bg-muted/25 text-muted-foreground">
           <ImageIcon className="size-7" />
           <span className="text-xs">连接文本后点击生成</span>
         </div>
       ) : null}
 
       {data.kind === "video" && data.url ? (
-        <div className="nodrag nowheel aspect-video bg-black">
+        <div className="nodrag nowheel min-h-0 flex-1 cursor-zoom-in bg-black" onDoubleClick={openPreview} title="双击全屏查看">
           <video src={resolveMediaUrl(data.url) ?? data.url} controls className="h-full w-full object-contain" />
         </div>
       ) : null}
 
       {data.kind === "video" && !data.url ? (
-        <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-black/5 text-muted-foreground dark:bg-white/5">
+        <div className="flex min-h-28 flex-1 flex-col items-center justify-center gap-2 bg-black/5 text-muted-foreground dark:bg-white/5">
           <Video className="size-7" />
           <span className="text-xs">连接文本或图片后点击生成</span>
         </div>
@@ -200,7 +235,7 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
           onChange={(event) => updateData({ content: event.target.value })}
           placeholder={data.kind === "text" ? "输入提示词或文本..." : "记录创意和待办..."}
           className={cn(
-            "nodrag nowheel min-h-32 w-full resize-none bg-transparent p-3 text-sm leading-6 outline-none",
+            "nodrag nowheel min-h-0 w-full flex-1 resize-none bg-transparent p-3 text-sm leading-6 outline-none",
             data.kind === "note" && "bg-amber-500/5",
           )}
         />
@@ -253,6 +288,37 @@ function ToolButton({
   );
 }
 
+function MediaPreviewOverlay({ preview, onClose }: { preview: MediaPreview; onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const source = resolveMediaUrl(preview.url) ?? preview.url;
+  return createPortal(
+    <div className="fixed inset-0 z-200 flex flex-col bg-black/92 backdrop-blur-sm" onClick={onClose}>
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4 text-white">
+        <h2 className="truncate text-sm font-medium">{preview.title}</h2>
+        <button type="button" onClick={onClose} className="rounded-md p-2 text-white/80 hover:bg-white/10 hover:text-white" aria-label="关闭预览">
+          <X className="size-5" />
+        </button>
+      </header>
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4" onClick={(event) => event.stopPropagation()}>
+        {preview.kind === "image" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={source} alt={preview.title} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <video src={source} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CanvasWorkspace() {
   const [nodes, setNodes] = useState<CanvasNode[]>(initialNodes);
   const [edges, setEdges] = useState<Edge[]>(initialEdges);
@@ -262,6 +328,8 @@ function CanvasWorkspace() {
   const [past, setPast] = useState<HistoryEntry[]>([]);
   const [future, setFuture] = useState<HistoryEntry[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [models, setModels] = useState<Record<1 | 2 | 3, AiModel | null>>({ 1: null, 2: null, 3: null });
   const [videoCapability, setVideoCapability] = useState<VideoModelCapability | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -351,6 +419,7 @@ function CanvasWorkspace() {
         id,
         type: "canvasNode",
         dragHandle: ".drag-handle",
+        style: { width: 300, height: kind === "text" || kind === "note" ? 250 : 280 },
         position: position ?? screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
         data: {
           kind,
@@ -639,6 +708,50 @@ function CanvasWorkspace() {
     [commitState, nodes, pushHistory],
   );
 
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+      if (connectionState.isValid || connectionState.toNode || !connectionState.fromNode) return;
+      const point = "changedTouches" in event ? event.changedTouches[0] : event;
+      if (!point) return;
+      setQuickCreate({
+        sourceId: connectionState.fromNode.id,
+        flowPosition: screenToFlowPosition({ x: point.clientX, y: point.clientY }),
+        screenPosition: { x: point.clientX, y: point.clientY },
+      });
+    },
+    [screenToFlowPosition],
+  );
+
+  const createConnectedNode = useCallback((kind: CanvasNodeKind) => {
+    if (!quickCreate) return;
+    const sourceId = quickCreate.sourceId;
+    const nodeId = addNode(kind, undefined, quickCreate.flowPosition);
+    setEdges((current) => {
+      const next = addEdge(
+        {
+          id: crypto.randomUUID(),
+          source: sourceId,
+          target: nodeId,
+          type: "smoothstep",
+          markerEnd: { type: MarkerType.ArrowClosed },
+        },
+        current,
+      );
+      edgesRef.current = next;
+      commitState(nodesRef.current, next);
+      return next;
+    });
+    setQuickCreate(null);
+  }, [addNode, commitState, quickCreate]);
+
+  useEffect(() => {
+    const openPreview = (event: Event) => {
+      setMediaPreview((event as CustomEvent<MediaPreview>).detail);
+    };
+    window.addEventListener("infinite-canvas:preview-media", openPreview);
+    return () => window.removeEventListener("infinite-canvas:preview-media", openPreview);
+  }, []);
+
   const deleteSelected = useCallback(() => {
     const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
     const hasSelection = selectedIds.size > 0 || edges.some((edge) => edge.selected);
@@ -810,6 +923,7 @@ function CanvasWorkspace() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           connectionLineType={ConnectionLineType.SmoothStep}
           defaultEdgeOptions={{ type: "smoothstep", markerEnd: { type: MarkerType.ArrowClosed } }}
           fitView
@@ -839,6 +953,7 @@ function CanvasWorkspace() {
             if (!event.dataTransfer.files.length) return;
             handleMediaFiles(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
           }}
+          onPaneClick={() => setQuickCreate(null)}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="var(--border)" />
           <MiniMap
@@ -870,6 +985,35 @@ function CanvasWorkspace() {
           </div>
         ) : null}
 
+        {quickCreate ? (
+          <div
+            className="absolute z-30 w-44 rounded-lg border bg-background p-1.5 shadow-xl"
+            style={{
+              left: Math.min(Math.max(quickCreate.screenPosition.x - 280, 12), window.innerWidth - 200),
+              top: Math.min(Math.max(quickCreate.screenPosition.y - 120, 12), window.innerHeight - 260),
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <p className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">创建并连接</p>
+            {([
+              ["text", "文本", Type],
+              ["note", "便签", StickyNote],
+              ["image", "AI 图片", ImageIcon],
+              ["video", "AI 视频", Video],
+            ] as const).map(([kind, label, Icon]) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => createConnectedNode(kind)}
+                className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm hover:bg-muted"
+              >
+                <Icon className="size-4 text-emerald-500" />
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-lg backdrop-blur">
           <Button size="icon-sm" variant="ghost" onClick={() => void zoomOut()} title="缩小"><ZoomOut /></Button>
           <Button size="icon-sm" variant="ghost" onClick={() => void zoomIn()} title="放大"><ZoomIn /></Button>
@@ -890,6 +1034,7 @@ function CanvasWorkspace() {
         <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => event.target.files && handleMediaFiles(event.target.files)} />
         <input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={importDocument} />
       </div>
+      {mediaPreview ? <MediaPreviewOverlay preview={mediaPreview} onClose={() => setMediaPreview(null)} /> : null}
     </div>
   );
 }
