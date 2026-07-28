@@ -93,6 +93,24 @@ class GenerationModelCapabilityServiceTests {
     }
 
     @Test
+    void shouldValidateVideoAspectRatioAgainstModelConfig() {
+        AiModel model = AiModel.builder()
+                .name("Grok Imagine Video")
+                .code("grok-imagine-video")
+                .modelType(3)
+                .config("{\"supportedAspectRatios\":[\"16:9\",\"9:16\"]}")
+                .build();
+
+        service.validateVideoTask(model, VideoTask.builder().ratio("16:9").build(), "newapi");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.validateVideoTask(model,
+                        VideoTask.builder().ratio("1:1").build(), "newapi"));
+
+        assertTrue(ex.getMessage().contains("16:9"));
+        assertTrue(ex.getMessage().contains("9:16"));
+    }
+
+    @Test
     void shouldUsePresetReferenceImageCapabilityForSupportedOpenAiImageModels() {
         List<String> supportedCodes = List.of("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-2");
 

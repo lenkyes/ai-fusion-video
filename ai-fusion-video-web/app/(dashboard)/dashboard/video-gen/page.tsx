@@ -114,10 +114,16 @@ export default function VideoGenPage() {
       .capability(model.id)
       .then((cap) => {
         if (cancelled) return;
+        const resolutions = (cap.supportedResolutions ?? []).filter(Boolean);
+        const aspectRatios = (cap.supportedAspectRatios ?? []).filter(Boolean);
         setCapability(cap);
         setDurationInput(String(clampDuration(cap.defaultDuration ?? 5, cap)));
-        setResolution(cap.supportedResolutions?.[0] ?? "");
-        setRatio(cap.supportedAspectRatios?.[0] ?? "");
+        setResolution((current) =>
+          resolutions.includes(current) ? current : (resolutions[0] ?? ""),
+        );
+        setRatio((current) =>
+          aspectRatios.includes(current) ? current : (aspectRatios[0] ?? ""),
+        );
       })
       .catch(() => {});
     return () => {

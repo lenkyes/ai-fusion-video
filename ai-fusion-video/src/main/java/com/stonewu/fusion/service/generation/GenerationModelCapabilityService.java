@@ -176,6 +176,13 @@ public class GenerationModelCapabilityService {
                     + " 不支持分辨率 " + task.getResolution() + "，可选值：" + String.join("、", supportedResolutions));
         }
 
+        List<String> supportedAspectRatios = getStringList(getMergedModelConfig(model), "supportedAspectRatios");
+        if (StrUtil.isNotBlank(task.getRatio()) && !supportedAspectRatios.isEmpty()
+                && supportedAspectRatios.stream().noneMatch(value -> value.equalsIgnoreCase(task.getRatio()))) {
+            throw new BusinessException("当前视频模型 " + modelLabel(model)
+                    + " 不支持宽高比 " + task.getRatio() + "，可选值：" + String.join("、", supportedAspectRatios));
+        }
+
         if (hasFirstFrame && !capability.supportsFirstFrame()) {
             throw new BusinessException("当前视频模型 " + modelLabel(model)
                     + " 不支持首帧图输入，请不要传 firstFrameImageUrl。");
