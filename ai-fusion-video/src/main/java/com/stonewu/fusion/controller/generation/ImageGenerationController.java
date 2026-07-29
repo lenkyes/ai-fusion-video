@@ -8,7 +8,11 @@ import com.stonewu.fusion.convert.generation.GenerationConvert;
 import com.stonewu.fusion.entity.generation.ImageItem;
 import com.stonewu.fusion.entity.generation.ImageTask;
 import com.stonewu.fusion.entity.generation.ImageGenerationSession;
+import com.stonewu.fusion.entity.ai.AiModel;
 import com.stonewu.fusion.mapper.generation.ImageGenerationSessionMapper;
+import cn.hutool.json.JSONObject;
+import com.stonewu.fusion.service.ai.AiModelService;
+import com.stonewu.fusion.service.generation.GenerationModelCapabilityService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stonewu.fusion.service.generation.ImageGenerationService;
 import com.stonewu.fusion.service.generation.consumer.ImageGenerationConsumer;
@@ -34,6 +38,22 @@ public class ImageGenerationController {
     private final ImageGenerationService imageGenerationService;
     private final ImageGenerationConsumer imageGenerationConsumer;
     private final ImageGenerationSessionMapper sessionMapper;
+    private final AiModelService aiModelService;
+    private final GenerationModelCapabilityService generationModelCapabilityService;
+
+    @Operation(summary = "查询图片模型能力配置（尺寸/宽高比等）")
+    @GetMapping("/capability")
+    public CommonResult<JSONObject> capability(@RequestParam(required = false) Long modelId) {
+        AiModel model = modelId != null ? aiModelService.getById(modelId) : null;
+        if (model == null) {
+            model = aiModelService.getDefaultByType(2);
+        }
+        if (model == null) {
+            List<AiModel> imageModels = aiModelService.getListByType(2);
+            model = imageModels.isEmpty() ? null : imageModels.get(0);
+        }
+        return CommonResult.success(generationModelCapabilityService.buildImageCapabilitySnapshot(model));
+    }
 
     @GetMapping("/sessions")
     public CommonResult<List<ImageGenerationSession>> sessions() {

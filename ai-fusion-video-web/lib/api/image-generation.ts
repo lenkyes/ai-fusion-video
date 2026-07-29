@@ -20,6 +20,16 @@ export interface ImageGenerationSession {
   createTime: string;
   updateTime: string;
 }
+export interface ImageModelCapability {
+  configured: boolean;
+  modelId?: number;
+  modelName?: string;
+  platform?: string;
+  supportedAspectRatios?: string[];
+  supportedSizes?: Record<string, Record<string, string>>;
+  defaultWidth?: number;
+  defaultHeight?: number;
+}
 export const imageGenerationApi = {
   page: (sessionId: number) =>
     http.get<never, { list: ImageTask[]; total: number }>(
@@ -36,6 +46,10 @@ export const imageGenerationApi = {
     ),
   items: (id: number) =>
     http.get<never, ImageItem[]>(`/api/generation/image/${id}/items`),
+  capability: (modelId?: number) =>
+    http.get<never, ImageModelCapability>(
+      `/api/generation/image/capability${modelId ? `?modelId=${modelId}` : ""}`,
+    ),
   sessions: () =>
     http.get<never, ImageGenerationSession[]>("/api/generation/image/sessions"),
   createSession: (title: string) =>

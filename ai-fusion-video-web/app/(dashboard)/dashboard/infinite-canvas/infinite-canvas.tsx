@@ -64,10 +64,17 @@ import {
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { aiModelApi, type AiModel } from "@/lib/api/ai-model";
 import { pipelineStream } from "@/lib/api/ai-pipeline";
-import { imageGenerationApi } from "@/lib/api/image-generation";
+import { imageGenerationApi, type ImageModelCapability } from "@/lib/api/image-generation";
 import { videoGenerationApi, type VideoModelCapability } from "@/lib/api/video-generation";
 import { resolveMediaUrl } from "@/lib/api/client";
 import { uploadFile, uploadVideo } from "@/lib/api/storage";
@@ -84,6 +91,10 @@ type CanvasNodeData = {
   modelName?: string;
   generated?: boolean;
   uploading?: boolean;
+  imageResolution?: string;
+  imageAspectRatio?: string;
+  imageSizes?: Record<string, Record<string, string>>;
+  imageAspectRatios?: string[];
 };
 
 type CanvasNode = Node<CanvasNodeData, "canvasNode">;
@@ -143,6 +154,15 @@ function cloneHistory(nodes: CanvasNode[], edges: Edge[]): HistoryEntry {
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function selectDefaultImageOptions(capability: ImageModelCapability | null) {
+  const sizes = capability?.supportedSizes ?? {};
+  const resolutions = Object.keys(sizes);
+  const resolution = resolutions.find((value) => value.toUpperCase() === "4K") ?? resolutions.at(-1) ?? "";
+  const availableRatios = resolution ? Object.keys(sizes[resolution] ?? {}) : (capability?.supportedAspectRatios ?? []);
+  const aspectRatio = availableRatios.includes("16:9") ? "16:9" : availableRatios[0] ?? "";
+  return { resolution, aspectRatio };
 }
 
 function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
@@ -213,6 +233,54 @@ function CanvasNodeView({ id, data, selected }: NodeProps<CanvasNode>) {
         <div className="flex min-h-28 flex-1 flex-col items-center justify-center gap-2 bg-muted/25 text-muted-foreground">
           <ImageIcon className="size-7" />
           <span className="text-xs">连接文本后点击生成</span>
+        </div>
+      ) : null}
+
+      {data.kind === "image" ? (
+        <div className="nodrag nowheel grid grid-cols-2 gap-2 border-t px-3 py-2">
+          <label className="min-w-0 space-y-1">
+            <span className="block text-[10px] text-muted-foreground">分辨率</span>
+            <Select
+              value={data.imageResolution ?? ""}
+              onValueChange={(value) => {
+                const resolution = value ?? "";
+                const ratios = Object.keys(data.imageSizes?.[resolution] ?? {});
+                updateData({
+                  imageResolution: resolution,
+                  imageAspectRatio: ratios.includes(data.imageAspectRatio ?? "")
+                    ? data.imageAspectRatio
+                    : ratios.includes("16:9") ? "16:9" : ratios[0] ?? data.imageAspectRatio,
+                });
+              }}
+              disabled={!Object.keys(data.imageSizes ?? {}).length}
+            >
+              <SelectTrigger size="sm" className="h-7 w-full rounded-md px-2 text-xs">
+                <SelectValue placeholder="默认" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(data.imageSizes ?? {}).map((resolution) => (
+                  <SelectItem key={resolution} value={resolution}>{resolution}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="min-w-0 space-y-1">
+            <span className="block text-[10px] text-muted-foreground">宽高比</span>
+            <Select
+              value={data.imageAspectRatio ?? ""}
+              onValueChange={(value) => updateData({ imageAspectRatio: value ?? "" })}
+            >
+              <SelectTrigger size="sm" className="h-7 w-full rounded-md px-2 text-xs">
+                <SelectValue placeholder="默认" />
+              </SelectTrigger>
+              <SelectContent>
+                {(data.imageResolution
+                  ? Object.keys(data.imageSizes?.[data.imageResolution] ?? {})
+                  : data.imageAspectRatios ?? []
+                ).map((ratio) => <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
         </div>
       ) : null}
 
@@ -331,6 +399,7 @@ function CanvasWorkspace() {
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [models, setModels] = useState<Record<1 | 2 | 3, AiModel | null>>({ 1: null, 2: null, 3: null });
+  const [imageCapability, setImageCapability] = useState<ImageModelCapability | null>(null);
   const [videoCapability, setVideoCapability] = useState<VideoModelCapability | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -383,6 +452,9 @@ function CanvasWorkspace() {
           3: videoModels.find((model) => model.defaultModel) ?? videoModels[0] ?? null,
         } as Record<1 | 2 | 3, AiModel | null>;
         setModels(nextModels);
+        if (nextModels[2]) {
+          setImageCapability(await imageGenerationApi.capability(nextModels[2].id));
+        }
         if (nextModels[3]) {
           setVideoCapability(await videoGenerationApi.capability(nextModels[3].id));
         }
@@ -395,6 +467,7 @@ function CanvasWorkspace() {
   }, []);
 
   useEffect(() => {
+    const imageDefaults = selectDefaultImageOptions(imageCapability);
     const names: Record<CanvasNodeKind, string | undefined> = {
       text: models[1]?.name,
       note: undefined,
@@ -404,12 +477,25 @@ function CanvasWorkspace() {
     setNodes((current) => {
       const next = current.map((node) => ({
         ...node,
-        data: { ...node.data, modelName: names[node.data.kind] },
+        data: {
+          ...node.data,
+          modelName: names[node.data.kind],
+          ...(node.data.kind === "image" ? {
+            imageSizes: imageCapability?.supportedSizes ?? {},
+            imageAspectRatios: imageCapability?.supportedAspectRatios ?? [],
+            imageResolution: node.data.imageResolution && imageCapability?.supportedSizes?.[node.data.imageResolution]
+              ? node.data.imageResolution : imageDefaults.resolution,
+            imageAspectRatio: node.data.imageAspectRatio && (
+              imageCapability?.supportedSizes?.[node.data.imageResolution ?? imageDefaults.resolution]?.[node.data.imageAspectRatio]
+              || (!node.data.imageResolution && imageCapability?.supportedAspectRatios?.includes(node.data.imageAspectRatio))
+            ) ? node.data.imageAspectRatio : imageDefaults.aspectRatio,
+          } : {}),
+        },
       }));
       nodesRef.current = next;
       return next;
     });
-  }, [models]);
+  }, [imageCapability, models]);
 
   const addNode = useCallback(
     (kind: CanvasNodeKind, url?: string, position?: { x: number; y: number }, title?: string) => {
@@ -428,6 +514,12 @@ function CanvasWorkspace() {
           url,
           status: "idle",
           modelName: kind === "text" ? models[1]?.name : kind === "image" ? models[2]?.name : kind === "video" ? models[3]?.name : undefined,
+          ...(kind === "image" ? {
+            imageSizes: imageCapability?.supportedSizes ?? {},
+            imageAspectRatios: imageCapability?.supportedAspectRatios ?? [],
+            imageResolution: selectDefaultImageOptions(imageCapability).resolution,
+            imageAspectRatio: selectDefaultImageOptions(imageCapability).aspectRatio,
+          } : {}),
         },
       };
       setNodes((current) => {
@@ -437,7 +529,7 @@ function CanvasWorkspace() {
       });
       return id;
     },
-    [commitState, edges, models, pushHistory, screenToFlowPosition],
+    [commitState, edges, imageCapability, models, pushHistory, screenToFlowPosition],
   );
 
   useEffect(() => {
@@ -560,12 +652,22 @@ function CanvasWorkspace() {
     const model = models[2];
     if (!model) throw new Error("未配置默认图片模型");
     patchNode(node.id, { status: "queued", error: undefined, generated: false });
+    const sizeValue = node.data.imageResolution && node.data.imageAspectRatio
+      ? node.data.imageSizes?.[node.data.imageResolution]?.[node.data.imageAspectRatio]
+      : undefined;
+    const sizeMatch = sizeValue?.match(/^(\d+)[x*](\d+)$/i);
     const taskId = await imageGenerationApi.submit({
       prompt,
       modelId: model.id,
       refImageUrls: references.length ? JSON.stringify(references) : undefined,
       count: 1,
       category: "infinite_canvas",
+      resolution: imageCapability?.platform?.toLowerCase() === "dashscope"
+        ? undefined : node.data.imageResolution || undefined,
+      ratio: node.data.imageAspectRatio || undefined,
+      aspectRatio: node.data.imageAspectRatio || undefined,
+      width: sizeMatch ? Number(sizeMatch[1]) : imageCapability?.defaultWidth,
+      height: sizeMatch ? Number(sizeMatch[2]) : imageCapability?.defaultHeight,
     });
     for (let index = 0; index < 180; index++) {
       const task = await imageGenerationApi.get(taskId);
@@ -581,7 +683,7 @@ function CanvasWorkspace() {
       await wait(2000);
     }
     throw new Error("图片生成超时");
-  }, [models, patchNode]);
+  }, [imageCapability, models, patchNode]);
 
   const runVideoNode = useCallback(async (node: CanvasNode, prompt: string, references: string[]) => {
     const model = models[3];
